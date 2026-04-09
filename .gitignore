@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+data/
+models/
+results/
+logs/*.log
+crash_diagnostic.log
+*.egg-info/
+.ipynb_checkpoints/
+CARLA_0.9.16/

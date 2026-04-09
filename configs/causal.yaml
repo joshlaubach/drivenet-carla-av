@@ -1,0 +1,74 @@
+# Causal Analysis Configuration
+# Canonical source for all parameters used by CausalAnalysisAgent and Notebook 05.
+
+n_bootstrap: 10000
+min_treated: 20
+random_seed: 42
+
+# Treatment definitions using a declarative filter DSL.
+# The agent reconstructs filter callables from {field, op, value} at runtime.
+# Supported operators: eq (equality), in (set membership).
+# Lists of conditions are combined with AND.
+treatments:
+  - name: rain
+    outcome: route_completion
+    treated_condition:
+      field: weather
+      op: eq
+      value: HardRainNoon
+    control_condition:
+      field: weather
+      op: eq
+      value: ClearNoon
+    covariates: [model_type_code, town_code]
+
+  - name: night
+    outcome: route_completion
+    treated_condition:
+      field: weather
+      op: eq
+      value: ClearNight
+    control_condition:
+      field: weather
+      op: eq
+      value: ClearNoon
+    covariates: [model_type_code, town_code]
+
+  - name: urban
+    outcome: collision_rate
+    treated_condition:
+      field: town
+      op: in
+      value: [Town01, Town03]
+    control_condition:
+      field: town
+      op: in
+      value: [Town05]
+    covariates: [weather_code, model_type_code]
+
+  - name: ppo
+    outcome: route_completion
+    treated_condition:
+      field: model_type
+      op: eq
+      value: ppo
+    control_condition:
+      field: model_type
+      op: eq
+      value: bc
+    covariates: [weather_code, town_code]
+
+  - name: driving_style
+    outcome: route_completion
+    treated_condition:
+      - field: model_type
+        op: eq
+        value: ppo
+      - field: driving_style
+        op: eq
+        value: chill
+    control_condition:
+      field: model_type
+      op: eq
+      value: bc
+    covariates: [weather_code, town_code]

@@ -1,0 +1,27 @@
+# Evaluation Configuration
+# Canonical source for all parameters used by EvaluationAgent and Notebook 04.
+
+eval_weathers:
+  - ClearNoon
+  - HardRainNoon
+  - ClearNight
+
+episodes_per_condition: 3
+max_steps_per_episode: 2000
+grp_sampling: 2.0
+
+# Image crop constants (300-px-tall eval camera, same as PPO)
+crop:
+  ppo_crop_top: 65
+  ppo_crop_bottom: 265
+  bc_crop_top: 65
+  bc_crop_bottom: 265
+
+# BC model specs (PPO models are discovered per-town at runtime)
+model_specs:
+  - name: BC_model
+    file: BC_model_best.pt
+    type: bc
+    meta: true
+
+meta_dims: [6, 6, 3, 3, 3]

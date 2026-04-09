@@ -1,0 +1,78 @@
+# Data Collection Configuration
+# Canonical source for all parameters used by DataCollectionAgent and Notebook 01.
+
+seed: 42
+
+# Camera resolution for data collection (full resolution)
+image_width: 800
+image_height: 600
+
+# Collection targets
+frames_per_condition: 300
+chunk_size: 2400
+
+# Weather presets (6 base conditions)
+weather_presets:
+  - ClearNoon
+  - CloudyNoon
+  - WetNoon
+  - HardRainNoon
+  - ClearSunset
+  - ClearNight
+
+# Per-preset atmospheric parameters (sun angle overridden by TOD)
+weather_params:
+  ClearNoon:
+    cloudiness: 0
+    precipitation: 0
+    precipitation_deposits: 0
+    wind_intensity: 0.0
+    fog_density: 0
+    wetness: 0
+  CloudyNoon:
+    cloudiness: 80
+    precipitation: 0
+    precipitation_deposits: 0
+    wind_intensity: 0.35
+    fog_density: 0
+    wetness: 0
+  WetNoon:
+    cloudiness: 40
+    precipitation: 20
+    precipitation_deposits: 60
+    wind_intensity: 0.35
+    fog_density: 0
+    wetness: 50
+  HardRainNoon:
+    cloudiness: 90
+    precipitation: 80
+    precipitation_deposits: 90
+    wind_intensity: 1.0
+    fog_density: 0
+    wetness: 100
+  ClearSunset:
+    cloudiness: 10
+    precipitation: 0
+    precipitation_deposits: 0
+    wind_intensity: 0.0
+    fog_density: 0
+    wetness: 0
+  ClearNight:
+    cloudiness: 5
+    precipitation: 0
+    precipitation_deposits: 0
+    wind_intensity: 0.0
+    fog_density: 0
+    wetness: 0
+
+# Time-of-day sun altitude angles (degrees)
+tod_sun_angles:
+  day: 75.0
+  sunset: 15.0
+  night: -90.0
+
+# NPC vehicle counts per traffic density tier
+traffic_vehicle_counts:
+  low: 10
+  medium: 30
+  high: 60

@@ -1,0 +1,50 @@
+# Behavior Cloning Configuration
+# Canonical source for all parameters used by BehaviorCloningAgent and Notebook 02.
+
+seed: 42
+batch_size: 128
+lr: 1.0e-4
+weight_decay: 1.0e-5
+max_epochs: 200
+early_stop_patience: 20
+lr_patience: 3
+lr_factor: 0.5
+dropout: 0.3
+loss_weights: [1.0, 1.0, 5.0]   # steer, throttle, brake (brake upweighted 5x)
+test_fraction: 0.15
+val_fraction: 0.10
+meta_dims: [6, 6, 3, 3, 3]      # weather, town, road_type, tod, traffic
+
+model_name: BC_model
+
+# Metadata string-to-integer encoding maps
+weather_codes:
+  ClearNoon: 0
+  CloudyNoon: 1
+  WetNoon: 2
+  HardRainNoon: 3
+  ClearSunset: 4
+  ClearNight: 5
+
+town_codes:
+  Town01: 0
+  Town02: 1
+  Town03: 2
+  Town04: 3
+  Town05: 4
+  Town10HD: 5
+
+road_type_codes:
+  highway: 0
+  rural: 1
+  urban: 2
+
+tod_codes:
+  day: 0
+  sunset: 1
+  night: 2
+
+traffic_codes:
+  low: 0
+  medium: 1
+  high: 2

@@ -1,0 +1,56 @@
+# PPO Fine-Tuning Configuration
+# Canonical source for all parameters used by PPOAgent and Notebook 03.
+
+seed: 42
+dropout: 0.3
+
+# Camera resolution for PPO (half of collection resolution)
+cam_w: 400
+cam_h: 300
+
+# PPO hyperparameters
+lr: 3.0e-5
+clip_eps: 0.2
+entropy_coef: 0.01
+value_loss_coef: 0.5
+n_steps: 512
+batch_size: 64
+n_epochs_ppo: 4
+gamma: 0.99
+gae_lambda: 0.95
+total_timesteps: 200000
+curriculum_switch_step: 50000
+max_grad_norm: 0.5
+
+# Image crop for 300-px-tall PPO camera images
+crop_top: 65
+crop_bottom: 265
+
+# Curriculum weather phases
+weather_phase1:
+  - ClearNoon
+
+weather_phase2:
+  - ClearNoon
+  - CloudyNoon
+  - WetNoon
+  - HardRainNoon
+  - ClearSunset
+  - ClearNight
+
+# Driving style reward profiles
+# Style affects jerk penalty, speed bonus, and lane change penalty weights.
+# Reward = base_reward - jerk * w_jerk + speed_bonus * w_speed - lane_change * w_lane
+reward_profiles:
+  chill:
+    jerk_penalty: 2.0
+    speed_bonus: 0.5
+    lane_change_penalty: 2.0
+  standard:
+    jerk_penalty: 1.0
+    speed_bonus: 1.0
+    lane_change_penalty: 1.0
+  hurry:
+    jerk_penalty: 0.5
+    speed_bonus: 2.0
+    lane_change_penalty: 0.5

@@ -1,0 +1,17 @@
+carla==0.9.16
+torch>=2.0.0
+torchvision>=0.15.0
+gymnasium>=1.0.0
+numpy
+opencv-python
+matplotlib
+tqdm
+pandas
+scikit-learn
+scipy
+psutil
+nbformat
+nbclient
+jupyter_client
+ipykernel
+pyyaml
