@@ -9,3 +9,5 @@ crash_diagnostic.log
 *.egg-info/
 .ipynb_checkpoints/
 CARLA_0.9.16/
+.claude/
+

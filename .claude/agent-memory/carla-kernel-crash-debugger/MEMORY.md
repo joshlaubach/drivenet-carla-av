@@ -1,2 +1,0 @@
-- [Restart-and-Run-All crash](project_restart_runall_crash.md) -- 0xC0000409 from unnecessary CARLA kill/relaunch when all towns complete; fixed with _town_complete() guard
-- [Sensor callback guards](project_sensor_callback_guards.md) -- listen() callbacks must be try/except wrapped to prevent C++ thread corruption
