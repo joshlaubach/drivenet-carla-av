@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 
 
 class PPOAgent:
-    """Fine-tunes a BC-initialised ActorCritic via PPO through live CARLA interaction.
+    """Fine-tunes a BC-initialized ActorCritic via PPO through live CARLA interaction.
 
     Does not implement PPO math -- sequences ActorCritic, RolloutBuffer,
     ppo_update, and CarlaEnv per workflows/03_ppo_finetuning.md.
@@ -119,7 +119,7 @@ class PPOAgent:
 
         history: dict[str, list[float]] = {
             "policy_losses": [], "value_losses": [], "entropy_bonuses": [],
-            "episode_rewards": [], "episode_lengths": [],
+            "kl_divs": [], "episode_rewards": [], "episode_lengths": [],
         }
         best_mean_reward = -math.inf
         checkpoint_path = self.save_dir / f"ppo_{self.town}_{self.style}_best.pt"
@@ -273,7 +273,7 @@ class PPOAgent:
                 gae_lambda=cfg["gae_lambda"],
             )
 
-            p_loss, v_loss, ent = ppo_update(
+            p_loss, v_loss, ent, kl = ppo_update(
                 model=model,
                 optimizer=optimizer,
                 buffer=buffer,
@@ -296,6 +296,7 @@ class PPOAgent:
                 history["policy_losses"].append(p_loss)
                 history["value_losses"].append(v_loss)
                 history["entropy_bonuses"].append(ent)
+                history["kl_divs"].append(kl)
 
             # -- Checkpoint on improved mean reward ----------------------------
             if len(recent_episode_rewards) >= 5:
@@ -316,10 +317,10 @@ class PPOAgent:
                 )
                 log.info(
                     "[%s/%s] Step %6d/%d  policy=%.4f  value=%.4f  "
-                    "entropy=%.4f  mean_ep_r=%.2f",
+                    "entropy=%.4f  kl=%.4f  mean_ep_r=%.2f",
                     self.town, self.style,
                     total_steps, cfg["total_timesteps"],
-                    p_loss, v_loss, ent, mean_r,
+                    p_loss, v_loss, ent, kl, mean_r,
                 )
 
         return history

@@ -133,9 +133,9 @@ class GPUAugmenter:
             tops = torch.randint(0, h - eh, (n_erase,), device=self.device)
             lefts = torch.randint(0, w - ew, (n_erase,), device=self.device)
             erase_indices = torch.where(erase_mask)[0]
-            for i, (t, l) in enumerate(zip(tops, lefts)):
+            for i, (t, left) in enumerate(zip(tops, lefts)):
                 idx = erase_indices[i]
-                images[idx, :, t:t + eh, l:l + ew] = torch.rand(
+                images[idx, :, t:t + eh, left:left + ew] = torch.rand(
                     c, eh, ew, device=self.device,
                 )
 

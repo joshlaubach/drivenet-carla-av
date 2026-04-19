@@ -8,8 +8,6 @@ Does not implement training orchestration -- see PPOAgent for that.
 from __future__ import annotations
 
 import logging
-import math
-from typing import Any
 
 import numpy as np
 import torch
@@ -20,6 +18,14 @@ from src.drivenet import DriveNet
 from src.preprocessing import RESIZE_H, RESIZE_W
 
 log = logging.getLogger(__name__)
+
+# Reference cruise speed used to normalize the speed bonus to roughly [0, 1]
+# under typical urban driving. Matches CARLA's default urban speed limit.
+SPEED_BONUS_REF_KMH: float = 40.0
+
+# Empirical jerk scale (km/h/s^2): a moderate-jerk trajectory produces a
+# penalty of order 1 at this normalization factor.
+JERK_NORM_FACTOR: float = 1000.0
 
 
 # ---------------------------------------------------------------------------
@@ -60,15 +66,14 @@ def compute_style_reward(
     reward = base_reward
 
     # -- Speed bonus (always active) --
-    reward += (speed_kmh / 40.0) * style_weights["speed_bonus"]
+    reward += (speed_kmh / SPEED_BONUS_REF_KMH) * style_weights["speed_bonus"]
 
-    # -- Jerk penalty (needs ≥2 prior speed readings) --
+    # -- Jerk penalty (needs >=2 prior speed readings) --
     if prev_lane_id != -1 and prev_prev_speed_kmh >= 0.0:
         accel_now = (speed_kmh - prev_speed_kmh) / dt
         accel_prev = (prev_speed_kmh - prev_prev_speed_kmh) / dt
         jerk = abs(accel_now - accel_prev) / dt
-        # Normalise jerk to keep penalty in a reasonable range
-        jerk_norm = jerk / 1000.0
+        jerk_norm = jerk / JERK_NORM_FACTOR
         reward -= jerk_norm * style_weights["jerk_penalty"]
 
     # -- Lane change penalty --
@@ -83,10 +88,17 @@ def compute_style_reward(
 # ---------------------------------------------------------------------------
 
 class ActorCritic(nn.Module):
-    """Actor-critic policy initialised from a BC DriveNet checkpoint.
+    """Actor-critic policy initialized from a BC DriveNet checkpoint.
 
     The actor head reuses the BC head weights; the critic head is a
     fresh 3-layer MLP over the same visual features.
+
+    Metadata embeddings from the BC checkpoint are deliberately dropped:
+    ActorCritic uses only the visual+state features for online PPO rollouts
+    where condition metadata is not available at inference time.
+
+    BatchNorm layers are frozen after loading BC weights to prevent running-stat
+    drift during PPO updates where minibatches are small and highly correlated.
     """
 
     def __init__(
@@ -106,6 +118,7 @@ class ActorCritic(nn.Module):
                 "Skipped %d BC-only keys (e.g. metadata embeddings)",
                 len(result.unexpected_keys),
             )
+        _bc.freeze_batchnorm()
 
         self.features = _bc.features
         self.actor_head = _bc.head
@@ -125,6 +138,18 @@ class ActorCritic(nn.Module):
                                                      dtype=torch.float32))
         else:
             self.log_std = nn.Parameter(torch.full((action_dim,), -0.5))
+
+    def train(self, mode: bool = True) -> "ActorCritic":
+        """Override to keep BN layers in eval mode regardless of global train/eval state.
+
+        PyTorch's default .train() recurses into all submodules and would unfreeze
+        the BN running stats that freeze_batchnorm() locked at init time.
+        """
+        super().train(mode)
+        for m in self.features.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.eval()
+        return self
 
     def _feats(self, image: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
         return torch.cat([self.features(image), state], dim=1)
@@ -240,7 +265,7 @@ class RolloutBuffer:
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
     ) -> None:
-        """Compute generalised advantage estimates in-place."""
+        """Compute generalized advantage estimates in-place."""
         last_gae = 0.0
         for t in reversed(range(self.n_steps)):
             if t == self.n_steps - 1:
@@ -304,11 +329,17 @@ def ppo_update(
     max_grad_norm: float,
     device: torch.device,
     scaler: torch.amp.GradScaler | None = None,
-) -> tuple[float, float, float]:
-    """Run n_epochs passes over the rollout buffer with optional AMP. Returns mean losses."""
+) -> tuple[float, float, float, float]:
+    """Run n_epochs passes over the rollout buffer with optional AMP.
+
+    Returns
+    -------
+    tuple of (mean_policy_loss, mean_value_loss, mean_entropy, mean_approx_kl)
+    """
     policy_losses: list[float] = []
     value_losses: list[float] = []
     entropy_bonuses: list[float] = []
+    kl_divs: list[float] = []
     use_amp = scaler is not None
 
     for _ in range(n_epochs):
@@ -334,12 +365,16 @@ def ppo_update(
                 policy_loss = -torch.min(surr1, surr2).mean()
 
                 value_loss = 0.5 * ((new_value - ret_b) ** 2).mean()
-                entropy_loss = -entropy.mean()
+                neg_entropy = -entropy.mean()
                 loss = (
                     policy_loss
                     + value_loss_coef * value_loss
-                    + entropy_coef * entropy_loss
+                    + entropy_coef * neg_entropy
                 )
+
+            with torch.no_grad():
+                approx_kl = (old_lp_b - new_lp).mean().item()
+                kl_divs.append(approx_kl)
 
             optimizer.zero_grad()
             if scaler is not None:
@@ -355,10 +390,11 @@ def ppo_update(
 
             policy_losses.append(policy_loss.item())
             value_losses.append(value_loss.item())
-            entropy_bonuses.append(-entropy_loss.item())
+            entropy_bonuses.append(entropy.mean().item())
 
     return (
         float(np.mean(policy_losses)),
         float(np.mean(value_losses)),
         float(np.mean(entropy_bonuses)),
+        float(np.mean(kl_divs)),
     )

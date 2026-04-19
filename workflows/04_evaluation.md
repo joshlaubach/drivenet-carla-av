@@ -30,7 +30,7 @@ All evaluation parameters are defined in `configs/eval.yaml`.
 |---|---|---|
 | `torch.load` | Load .pt checkpoint | Restore model weights |
 | `CarlaEnv` | `CarlaEnv(host, port, town, image_width=400, image_height=300)` | Live eval environment |
-| `preprocessing.preprocess_obs` | `preprocess_obs(obs)` | Obs → model input |
+| `preprocessing.preprocess_obs` | `preprocess_obs(obs)` | Obs -> model input |
 | `make_weather` | `carla_utils.make_weather(env, preset)` | Set evaluation weather |
 
 ## Metrics (per episode)
@@ -47,7 +47,7 @@ All evaluation parameters are defined in `configs/eval.yaml`.
 ```
 results/
     eval_results.json    # list of episode records with all metrics + metadata
-    eval_summary.csv     # aggregated mean ± std per model × condition
+    eval_summary.csv     # aggregated mean +/- std per model x condition
 ```
 
 Each episode record:
@@ -73,7 +73,7 @@ Each episode record:
 ## Sequencing
 1. Load all available model checkpoints into memory.
 2. Open CarlaEnv for the target town.
-3. For each model × weather × episode:
+3. For each model x weather x episode:
    a. Apply weather preset.
    b. Reset environment.
    c. Run episode for max 2000 steps using model's greedy action

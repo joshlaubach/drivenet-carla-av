@@ -1,16 +1,15 @@
 """Smoke tests verifying all agents import and those that don't need CARLA can instantiate."""
 
-import pytest
 
 
 def test_import_all_agents() -> None:
     """All 5 agents should be importable from the agents package."""
     from src.agents import (
-        DataCollectionAgent,
         BehaviorCloningAgent,
-        PPOAgent,
-        EvaluationAgent,
         CausalAnalysisAgent,
+        DataCollectionAgent,
+        EvaluationAgent,
+        PPOAgent,
     )
     assert DataCollectionAgent is not None
     assert BehaviorCloningAgent is not None

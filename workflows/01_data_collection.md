@@ -5,7 +5,7 @@ Collect expert driving demonstrations across 324 conditions for a single town.
 One agent run covers all conditions for one town; the full dataset requires six
 runs (one per town, with CARLA restarted between runs).
 
-Target: 300 frames per condition × 54 conditions per town × 6 towns = 97,200 frames.
+Target: 300 frames per condition x 54 conditions per town x 6 towns = 97,200 frames.
 All collection parameters are defined in `configs/collection.yaml`.
 
 ## Hardware Constraint
@@ -24,7 +24,7 @@ NPC counts. Summary:
 - **Time of day** (3): day, sunset, night (sun angles in config)
 - **Traffic density** (3): low, medium, high (NPC counts in config)
 
-Total per town: 6 × 3 × 3 = 54 conditions.
+Total per town: 6 x 3 x 3 = 54 conditions.
 
 ## Required Inputs
 - CARLA 0.9.16 server running at localhost:2000, launched with target town
@@ -51,28 +51,28 @@ data/<Town>/
 ```
 
 Each `.npz` file contains:
-- `images`: (N, 600, 800, 3) uint8 — raw camera frames
-- `states`: (N, 2) float32 — [speed_kmh, heading_degrees]
-- `actions`: (N, 3) float32 — [steer, throttle, brake]
-- `locations`: (N, 2) float32 — [x, y] in world coordinates
-- `tl_states`: (N,) uint8 — traffic light state (0=Red,1=Yellow,2=Green,3=Off)
-- `speed_limits`: (N,) float32 — posted speed limit in km/h
-- `weather_preset`: (N,) str — base weather name
-- `town`: (N,) str — town name
-- `road_type`: (N,) str — highway / rural / urban
-- `time_of_day`: (N,) str — day / sunset / night
-- `traffic_density`: (N,) str — low / medium / high
+- `images`: (N, 600, 800, 3) uint8 -- raw camera frames
+- `states`: (N, 2) float32 -- [speed_kmh, heading_degrees]
+- `actions`: (N, 3) float32 -- [steer, throttle, brake]
+- `locations`: (N, 2) float32 -- [x, y] in world coordinates
+- `tl_states`: (N,) uint8 -- traffic light state (0=Red,1=Yellow,2=Green,3=Off)
+- `speed_limits`: (N,) float32 -- posted speed limit in km/h
+- `weather_preset`: (N,) str -- base weather name
+- `town`: (N,) str -- town name
+- `road_type`: (N,) str -- highway / rural / urban
+- `time_of_day`: (N,) str -- day / sunset / night
+- `traffic_density`: (N,) str -- low / medium / high
 
 ## Sequencing
 1. Verify CARLA reachability; raise if not reachable.
-2. Open `CarlaEnv` for the target town (800×600 camera).
+2. Open `CarlaEnv` for the target town (800x600 camera).
 3. For each of the 54 conditions:
    a. Apply base weather config (cloudiness, precipitation, wetness).
    b. Override sun_altitude_angle for the time-of-day tier.
    c. Spawn NPC vehicles at traffic density count.
    d. Call `env.reset()` to spawn ego vehicle and sensors.
    e. Enable autopilot on ego via traffic manager.
-   f. Collect 300 frames: tick → read control → read obs → save.
+   f. Collect 300 frames: tick -> read control -> read obs -> save.
    g. On collision: log it, reset env, re-enable autopilot, continue.
    h. Destroy NPC vehicles before next condition.
 4. Flush remaining frames to the current chunk file.

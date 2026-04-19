@@ -72,10 +72,10 @@ Each result entry:
    b. Fit LogisticRegression on (X, T); compute propensity scores P(T=1|X).
    c. Match each treated unit to its nearest control unit by propensity score
       (1:1 without replacement via cKDTree).
-   d. Compute ATE = mean(outcome_treated) − mean(outcome_matched_control).
+   d. Compute ATE = mean(outcome_treated) - mean(outcome_matched_control).
    e. Bootstrap ATE 10,000 times (resample matched pairs with replacement);
       record 2.5th and 97.5th percentiles as 95% CI.
-   f. Compute Rosenbaum Gamma: find smallest Γ such that the Wilcoxon signed-rank
+   f. Compute Rosenbaum Gamma: find smallest Gamma such that the Wilcoxon signed-rank
       test on matched pairs exceeds p=0.05 under worst-case unmeasured confounding.
 3. Save results to `causal_results.json`.
 4. Plot propensity score distributions (before/after matching) for each treatment.
@@ -84,7 +84,7 @@ Each result entry:
 - **Insufficient treated units** (< 20): skip treatment and log warning.
 - **Propensity scores all near 0 or 1**: matching quality is poor; log overlap
   diagnostic and interpret ATE with caution.
-- **Perfect separation in logistic regression**: use C=1.0 regularisation to
+- **Perfect separation in logistic regression**: use C=1.0 regularization to
   prevent degenerate scores.
 
 ## Caveats

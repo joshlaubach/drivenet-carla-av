@@ -7,7 +7,7 @@ constraint: no runtime map switching on RTX 5080 Blackwell).
 
 ## Hardware Constraint
 Same as data collection: CARLA must be launched with the target town. The
-curriculum switches weather presets only — not towns — during a single run.
+curriculum switches weather presets only -- not towns -- during a single run.
 
 ## Required Inputs
 - BC checkpoint: `models/BC_model_best.pt` (or specify alternative)
@@ -21,11 +21,11 @@ curriculum switches weather presets only — not towns — during a single run.
 | `ppo.RolloutBuffer` | `RolloutBuffer(n_steps, obs_img_shape, obs_state_shape, action_dim)` | On-policy experience buffer |
 | `ppo.ppo_update` | `ppo_update(model, optimizer, buffer, ...)` | PPO gradient update step |
 | `CarlaEnv` | `CarlaEnv(host, port, town, image_width=400, image_height=300)` | Live environment |
-| `preprocessing.preprocess_obs` | `preprocess_obs(obs)` | Observation → model tensors |
+| `preprocessing.preprocess_obs` | `preprocess_obs(obs)` | Observation -> model tensors |
 
 ## Curriculum
-- **Phase 1** (0–50,000 steps): ClearNoon only — easy weather for policy warm-up.
-- **Phase 2** (50,000–200,000 steps): Random weather from the full 6-preset pool
+- **Phase 1** (0-50,000 steps): ClearNoon only -- easy weather for policy warm-up.
+- **Phase 2** (50,000-200,000 steps): Random weather from the full 6-preset pool
   sampled per episode reset.
 
 Weather is changed by calling `make_weather(env, preset)` at each episode reset.
@@ -48,7 +48,7 @@ r -= lane_change_event * w_lane
 where `w_jerk`, `w_speed`, `w_lane` come from the selected style profile.
 
 ## Driving Styles
-PPO supports three reward profiles that shape driving behaviour without
+PPO supports three reward profiles that shape driving behavior without
 changing the underlying PPO update math. Style weights are defined in
 `configs/ppo.yaml` under `reward_profiles`.
 
@@ -85,12 +85,12 @@ results/
 
 ## Sequencing
 1. Load BC checkpoint; build ActorCritic; load weights (strict=False for meta keys).
-2. Open CarlaEnv (400×300) for the target town. Apply ClearNoon weather.
-3. Reset environment; initialise RolloutBuffer(n_steps=512).
+2. Open CarlaEnv (400x300) for the target town. Apply ClearNoon weather.
+3. Reset environment; initialize RolloutBuffer(n_steps=512).
 4. Collect rollout:
-   a. preprocess_obs → img_t, state_t
-   b. model.get_action_and_value → action, log_prob, entropy, value
-   c. env.step(action.cpu().numpy()) → next_obs, reward, terminated, _, info
+   a. preprocess_obs -> img_t, state_t
+   b. model.get_action_and_value -> action, log_prob, entropy, value
+   c. env.step(action.cpu().numpy()) -> next_obs, reward, terminated, _, info
    d. buffer.add(img_t, state_t, action, log_prob, reward, value, terminated)
    e. On episode end (terminated or truncated): reset env, sample new weather
       if in Phase 2.

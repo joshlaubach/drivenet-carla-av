@@ -16,7 +16,15 @@ brake).
 - Windows 11 with an NVIDIA GPU (tested on RTX 5080, 32 GB system RAM)
 - CARLA 0.9.16 simulator installed at `CARLA_0.9.16/`
 - Python 3.11 with CUDA 12.8 support
-- All Python dependencies listed in `requirements.txt`
+- All Python dependencies (see `requirements.lock.txt` for pinned versions)
+
+## Installation
+
+```bash
+pip install -r requirements.lock.txt  # exact pinned versions (recommended)
+# or
+pip install -r requirements.txt       # loose manifest
+```
 
 ## Project Structure
 
@@ -74,12 +82,73 @@ CARLA AV/
     logs/                      Runtime logs (*.log files excluded from git)
 ```
 
+## Results
+
+Headline metrics across eval towns (Town01, Town03, Town05), averaged over N seeds.
+
+<!-- TODO: populate from results/eval_summary.json after final eval run -->
+
+| Model | Route Completion | Collision Rate | Lane Keep | Avg Speed (km/h) |
+|-------|-----------------|----------------|-----------|-----------------|
+| BC baseline | ... | ... | ... | ... |
+| PPO chill | ... | ... | ... | ... |
+| PPO standard | ... | ... | ... | ... |
+| PPO hurry | ... | ... | ... | ... |
+
+Confidence intervals via bootstrap (1000 resamples, 95% CI). Significance
+testing via Mann-Whitney U with Benjamini-Hochberg FDR correction.
+
 ## Configuration
 
 All hyperparameters are defined in `configs/*.yaml`. Agents and notebooks load
 parameters from these files via `src.config.load_config()`. To change a
 hyperparameter, edit the YAML file -- both agents and notebooks read from the
 same source.
+
+## Reproducibility
+
+### Seeds
+
+All agents and the training pipeline set three seeds at startup from the `seed`
+field in the relevant config file (`configs/bc.yaml`, `configs/ppo.yaml`,
+`configs/eval.yaml`):
+
+```python
+torch.manual_seed(seed)
+np.random.seed(seed)
+random.seed(seed)
+```
+
+Default seed is `42` for all configs. To change it, edit the YAML field -- all
+agents and notebooks read from the same source.
+
+### CUDNN Determinism
+
+CUDNN determinism is **not** enabled. Enabling it imposes a large runtime
+penalty and is not practical for the multi-hour CARLA training loops. Expect
+minor run-to-run variation in the final metric values.
+
+### Training Runs
+
+Each reported metric is the result of a **single training run** per
+town/style combination. Multi-seed averaging was not feasible within the
+available compute budget.
+
+### Environment Versions
+
+| Component | Version |
+|-----------|---------|
+| Python    | 3.11.x  |
+| CUDA      | 12.8    |
+| PyTorch   | 2.3.1   |
+| CARLA     | 0.9.16  |
+| OS        | Windows 11 |
+
+### Known Non-Determinism Sources
+
+- CARLA server-side traffic spawning uses its own RNG that is not exposed to
+  the Python API and cannot be seeded from client code.
+- GPU floating-point order-of-operations may vary between runs.
 
 ## Notebook Pipeline
 
@@ -113,7 +182,7 @@ same source.
 PPO fine-tuning supports three driving styles that modify the reward signal
 via jerk, speed, and lane-change penalty weights:
 
-| Style | Jerk Penalty | Speed Bonus | Lane Change Penalty | Behaviour |
+| Style | Jerk Penalty | Speed Bonus | Lane Change Penalty | Behavior |
 |-------|-------------|-------------|---------------------|-----------|
 | Chill | 2.0 | 0.5 | 2.0 | Smooth, unhurried, minimal lane changes |
 | Standard | 1.0 | 1.0 | 1.0 | Balanced default profile |
@@ -185,7 +254,7 @@ currently loaded town. Repeat for each of the 6 towns.
 # For each town: start CARLA with that town loaded, run NB03, close CARLA
 CARLA_0.9.16/CarlaUE4.exe -dx12 /Game/Carla/Maps/Town01
 jupyter notebook notebooks/03_ppo_finetuning.ipynb
-# Run all cells. Output: models/ppo_Town01_{chill,standard,hurry}_best.pt
+# Run all cells. Output: models/ppo_Town01_chill_best.pt, ppo_Town01_standard_best.pt, ppo_Town01_hurry_best.pt
 # Close CARLA, restart with Town02/Town03/... and repeat
 ```
 
@@ -204,6 +273,22 @@ jupyter notebook notebooks/04_evaluation.ipynb
 jupyter notebook notebooks/05_causal_analysis.ipynb
 # Run all cells. Output: results/causal_results.json + plots
 ```
+
+## Limitations
+
+- Simulation-only evaluation; no sim-to-real transfer validated.
+- Expert data is CARLA autopilot, which has known weaknesses at unprotected
+  turns and in dense traffic. The BC policy inherits these.
+- 3 episodes per condition per town is a small sample; collision-rate
+  confidence intervals are wide. A full evaluation would require 20+ episodes.
+- Single-seed training per town/style combination. Multi-seed training was
+  not feasible under the compute budget.
+- Weather coverage is limited to 6 CARLA presets; no adversarial or
+  out-of-distribution weather testing.
+- BatchNorm is frozen during PPO fine-tuning to avoid running-stats drift;
+  GroupNorm would be a cleaner long-term choice.
+- Windows-only developer environment; pipeline is code-portable to Linux
+  but not validated there.
 
 ## CARLA Launch Reference
 
@@ -229,6 +314,9 @@ scripts/launch_carla.bat
 python scripts/diagnose_startup_matrix.py --town Town01 --repeat 3
 # Optional: include Vulkan control profile for A/B comparison
 python scripts/diagnose_startup_matrix.py --town Town01 --repeat 3 --include-vulkan
+
+# Run all notebooks in sequence (from repo root):
+python scripts/run_all.py
 ```
 
 The diagnostic report is saved to `results/startup_diagnostics/` as JSON and
@@ -238,6 +326,6 @@ sync mode and sensor probe outcomes, pass/fail stage per cycle.
 For teardown-specific crash validation, run:
 
 ```bash
-python test_crash_scenarios.py --scenario 13
-python test_crash_scenarios.py --scenario 14
+python tests/test_crash_scenarios.py --scenario 13
+python tests/test_crash_scenarios.py --scenario 14
 ```

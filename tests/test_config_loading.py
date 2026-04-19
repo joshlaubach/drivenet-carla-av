@@ -4,7 +4,6 @@ import pytest
 
 from src.config import load_config, require_keys
 
-
 # -- All configs load successfully --------------------------------------------
 
 CONFIG_NAMES = ["collection", "bc", "ppo", "eval", "causal"]

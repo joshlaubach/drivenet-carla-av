@@ -56,7 +56,8 @@ class DriveNet(nn.Module):
 
         # Compute flattened feature size from a dummy forward pass
         with torch.no_grad():
-            dummy = torch.zeros(1, 3, 100, 200)
+            from src.preprocessing import RESIZE_H, RESIZE_W
+            dummy = torch.zeros(1, 3, RESIZE_H, RESIZE_W)
             feat_size = self.features(dummy).shape[1]
 
         self.backbone_output_dim: int = feat_size + state_dim
@@ -86,6 +87,19 @@ class DriveNet(nn.Module):
             nn.Linear(64, action_dim),
         )
 
+    def freeze_batchnorm(self) -> None:
+        """Freeze BN running stats for PPO fine-tuning.
+
+        BatchNorm running stats continue updating in train mode, which
+        destabilizes PPO rollouts where minibatches are small and highly
+        correlated. Call this after loading BC weights and before PPO training.
+        """
+        for m in self.features.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.eval()
+                for p in m.parameters():
+                    p.requires_grad_(False)
+
     def extract_features(
         self, image: torch.Tensor, state: torch.Tensor
     ) -> torch.Tensor:
@@ -107,16 +121,12 @@ class DriveNet(nn.Module):
         x = self.features(image)
         parts = [x, state]
         if self.meta_dims is not None:
-            if meta is not None:
-                parts += [
-                    emb(meta[:, i])
-                    for i, emb in enumerate(self.meta_embeddings)
-                ]
-            else:
-                batch = x.shape[0]
-                for emb in self.meta_embeddings:
-                    parts.append(torch.zeros(batch, emb.embedding_dim,
-                                             device=x.device))
+            if meta is None:
+                raise ValueError(
+                    "DriveNet was built with meta_dims but received meta=None. "
+                    "Either pass metadata tensors or rebuild the model with meta_dims=None."
+                )
+            parts += [emb(meta[:, i]) for i, emb in enumerate(self.meta_embeddings)]
         x = torch.cat(parts, dim=1)
         x = self.head(x)
         steer = torch.tanh(x[:, 0:1])

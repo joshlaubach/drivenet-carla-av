@@ -1,6 +1,6 @@
 import math
 import weakref
-from queue import Queue, Empty
+from queue import Empty, Queue
 
 import carla
 import gymnasium
@@ -65,7 +65,7 @@ class CarlaEnv(gymnasium.Env):
         except Exception:
             pass
         _current_map = _init_world.get_map().name
-        # Normalise to short name (e.g. "/Game/Carla/Maps/Town03" -> "Town03")
+        # Normalize to short name (e.g. "/Game/Carla/Maps/Town03" -> "Town03")
         _map_short = _current_map.split("/")[-1]
         _town_short = town.split("/")[-1]
         if _town_short == _map_short or _town_short in _map_short or _map_short.endswith(_town_short):

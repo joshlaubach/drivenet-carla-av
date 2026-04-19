@@ -12,8 +12,8 @@ collected in notebook 01, using GPU augmentation and full metadata embeddings.
 | Tool | Call | Purpose |
 |---|---|---|
 | `np.load` | Load chunk_XXXX.npz files | Load raw expert data |
-| `preprocessing.crop_and_resize` | `crop_and_resize(images)` | Crop sky/hood; resize to 100×200 |
-| `preprocessing.encode_metadata` | `encode_metadata(data, *_codes)` | String labels → integer codes |
+| `preprocessing.crop_and_resize` | `crop_and_resize(images)` | Crop sky/hood; resize to 100x200 |
+| `preprocessing.encode_metadata` | `encode_metadata(data, *_codes)` | String labels -> integer codes |
 | `dataset.DrivingDataset` | `DrivingDataset(images, states, actions, meta, indices)` | PyTorch dataset |
 | `dataset.GPUAugmenter` | `GPUAugmenter(device, **aug_kwargs)` | On-GPU augmentation |
 | `drivenet.DriveNet` | `DriveNet(dropout, state_dim, action_dim, meta_dims)` | Policy network |

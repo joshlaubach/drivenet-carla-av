@@ -2,9 +2,9 @@
 Run all 5 DriveNet notebooks in sequence.
 
 Usage:
-    py -3.11 run_all.py              # run NB02-NB05 (skip NB01 since data exists)
-    py -3.11 run_all.py --all        # run NB01-NB05 (re-collect data, takes hours)
-    py -3.11 run_all.py --from 3     # start from NB03
+    py -3.11 scripts/run_all.py              # run NB02-NB05 (skip NB01 since data exists)
+    py -3.11 scripts/run_all.py --all        # run NB01-NB05 (re-collect data, takes hours)
+    py -3.11 scripts/run_all.py --from 3     # start from NB03
 
 Prerequisites:
     - CARLA server running for NB01, NB03, NB04
@@ -20,7 +20,7 @@ import traceback
 import nbformat
 from nbclient import NotebookClient
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NOTEBOOKS_DIR = os.path.join(PROJECT_ROOT, "notebooks")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "notebooks", "executed")
 

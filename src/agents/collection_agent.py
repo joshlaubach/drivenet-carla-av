@@ -24,7 +24,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 import random
@@ -38,7 +37,6 @@ import carla
 import numpy as np
 
 from src.carla_env import CarlaEnv
-from src.carla_utils import make_weather
 from src.config import load_config, require_keys
 
 log = logging.getLogger(__name__)
@@ -511,7 +509,7 @@ class DataCollectionAgent:
         dy = target.y - follow_loc.y
         target_angle = math.atan2(dy, dx)
         angle_error = target_angle - follow_yaw
-        # Normalise to [-pi, pi]
+        # Normalize to [-pi, pi]
         angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
         steer = float(np.clip(angle_error * _FOLLOW_STEER_GAIN, -1.0, 1.0))
 
