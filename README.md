@@ -26,6 +26,9 @@ pip install -r requirements.lock.txt  # exact pinned versions (recommended)
 pip install -r requirements.txt       # loose manifest
 ```
 
+For Linux CI or non-CARLA development, install `requirements-ci.txt` instead,
+which excludes the `carla` package.
+
 ## Project Structure
 
 ```

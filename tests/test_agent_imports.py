@@ -1,5 +1,8 @@
 """Smoke tests verifying all agents import and those that don't need CARLA can instantiate."""
 
+import pytest
+
+pytest.importorskip("carla", reason="CARLA Python API not available")
 
 
 def test_import_all_agents() -> None:

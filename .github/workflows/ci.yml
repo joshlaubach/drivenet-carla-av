@@ -1,29 +1,21 @@
 name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
+on: [push, pull_request]
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install dev deps
+          cache: 'pip'
+      - name: Install dev and CI deps
         run: |
+          pip install --upgrade pip
           pip install ruff pytest
-          pip install numpy torch --index-url https://download.pytorch.org/whl/cpu
-
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-ci.txt
       - name: Lint
         run: ruff check src/ tests/
-
       - name: Test
         run: pytest tests/ -v

@@ -18,6 +18,10 @@ Usage
 
 Results are printed to stdout and appended to crash_diagnostic.log.
 """
+# ruff: noqa: I001, E402 -- guarded CARLA skip must run before heavyweight imports
+
+import pytest
+pytest.importorskip("carla", reason="CARLA Python API not available")
 
 import argparse
 import os
