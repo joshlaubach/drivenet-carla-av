@@ -96,12 +96,13 @@ Headline metrics across eval towns (Town01, Town03, Town05), averaged over N see
 
 | Model | Route Completion | Collision Rate | Lane Keep | Avg Speed (km/h) |
 |-------|-----------------|----------------|-----------|-----------------|
-| BC baseline | ... | ... | ... | ... |
-| PPO chill | ... | ... | ... | ... |
-| PPO standard | ... | ... | ... | ... |
-| PPO hurry | ... | ... | ... | ... |
+| BC baseline | [run pending] | [run pending] | [run pending] | [run pending] |
+| PPO chill | [run pending] | [run pending] | [run pending] | [run pending] |
+| PPO standard | [run pending] | [run pending] | [run pending] | [run pending] |
+| PPO hurry | [run pending] | [run pending] | [run pending] | [run pending] |
 
-Confidence intervals via bootstrap (1000 resamples, 95% CI). Significance
+Results will be populated after final evaluation run. Confidence intervals
+computed via bootstrap resampling (1000 samples, 95% CI). Significance
 testing via Mann-Whitney U with Benjamini-Hochberg FDR correction.
 
 ## Configuration
