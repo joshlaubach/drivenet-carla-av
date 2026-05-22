@@ -1,8 +1,7 @@
-"""
-PPO primitives: ActorCritic network, RolloutBuffer, ppo_update, and
+"""PPO primitives: ActorCritic network, RolloutBuffer, ppo_update, and
 style-aware reward shaping.
 
-Does not implement training orchestration -- see PPOAgent for that.
+Training orchestration lives in PPOAgent, not here.
 """
 
 from __future__ import annotations
@@ -23,8 +22,8 @@ log = logging.getLogger(__name__)
 # under typical urban driving. Matches CARLA's default urban speed limit.
 SPEED_BONUS_REF_KMH: float = 40.0
 
-# Empirical jerk scale (km/h/s^2): a moderate-jerk trajectory produces a
-# penalty of order 1 at this normalization factor.
+# Empirical jerk scale: a moderate-jerk trajectory produces a penalty of
+# roughly 1.0 at this normalization factor.
 JERK_NORM_FACTOR: float = 1000.0
 
 
@@ -42,19 +41,19 @@ def compute_style_reward(
     style_weights: dict[str, float],
     dt: float = 0.05,
 ) -> float:
-    """Modify *base_reward* with style-dependent jerk, speed, and lane-change terms.
+    """Apply style-dependent jerk, speed, and lane-change terms to base_reward.
 
     Parameters
     ----------
     base_reward : float
-        Reward returned by ``CarlaEnv.step()``.
+        Reward returned by CarlaEnv.step() (a flat +1.0 per step).
     speed_kmh, prev_speed_kmh, prev_prev_speed_kmh : float
-        Three consecutive ego speed readings for jerk computation.
+        Three consecutive ego speed readings used to compute jerk.
     lane_id, prev_lane_id : int
         Current and previous CARLA waypoint lane IDs.
-        Use ``-1`` for the sentinel (first step of episode).
+        Pass -1 as a sentinel for the first step of an episode.
     style_weights : dict
-        Keys: ``jerk_penalty``, ``speed_bonus``, ``lane_change_penalty``.
+        Keys: jerk_penalty, speed_bonus, lane_change_penalty.
     dt : float
         Simulation timestep in seconds (default 0.05 = 20 FPS).
 
@@ -65,18 +64,14 @@ def compute_style_reward(
     """
     reward = base_reward
 
-    # -- Speed bonus (always active) --
     reward += (speed_kmh / SPEED_BONUS_REF_KMH) * style_weights["speed_bonus"]
 
-    # -- Jerk penalty (needs >=2 prior speed readings) --
     if prev_lane_id != -1 and prev_prev_speed_kmh >= 0.0:
         accel_now = (speed_kmh - prev_speed_kmh) / dt
         accel_prev = (prev_speed_kmh - prev_prev_speed_kmh) / dt
         jerk = abs(accel_now - accel_prev) / dt
-        jerk_norm = jerk / JERK_NORM_FACTOR
-        reward -= jerk_norm * style_weights["jerk_penalty"]
+        reward -= (jerk / JERK_NORM_FACTOR) * style_weights["jerk_penalty"]
 
-    # -- Lane change penalty --
     if prev_lane_id != -1 and lane_id != prev_lane_id:
         reward -= style_weights["lane_change_penalty"]
 
@@ -90,82 +85,99 @@ def compute_style_reward(
 class ActorCritic(nn.Module):
     """Actor-critic policy initialized from a BC DriveNet checkpoint.
 
-    The actor head reuses the BC head weights; the critic head is a
-    fresh 3-layer MLP over the same visual features.
+    Only the CNN feature extractor transfers from BC. Both the actor and
+    critic heads are freshly initialized because the BC head has a
+    different input size (it includes metadata embeddings). The visual
+    backbone is what carries over the learned driving representation.
 
-    Metadata embeddings from the BC checkpoint are deliberately dropped:
-    ActorCritic uses only the visual+state features for online PPO rollouts
-    where condition metadata is not available at inference time.
+    A learned style embedding (chill / standard / hurry) is concatenated
+    with the visual features and state before being passed to both heads,
+    allowing one model to express multiple driving personalities.
 
-    BatchNorm layers are frozen after loading BC weights to prevent running-stat
-    drift during PPO updates where minibatches are small and highly correlated.
+    GroupNorm in the backbone requires no special handling during PPO
+    updates -- unlike BatchNorm, it does not accumulate running statistics
+    that could drift on small, correlated minibatches.
     """
 
     def __init__(
         self,
         bc_state_dict: dict[str, torch.Tensor],
         dropout: float = 0.3,
-        state_dim: int = 3,
+        state_dim: int = 6,
         action_dim: int = 3,
+        n_styles: int = 3,
+        style_embed_dim: int = 4,
         log_std_init: list[float] | None = None,
     ) -> None:
         super().__init__()
-        _bc = DriveNet(dropout=dropout, state_dim=state_dim,
-                       action_dim=action_dim)
+
+        _bc = DriveNet(dropout=dropout, state_dim=state_dim, action_dim=action_dim)
         result = _bc.load_state_dict(bc_state_dict, strict=False)
         if result.unexpected_keys:
             log.info(
-                "Skipped %d BC-only keys (e.g. metadata embeddings)",
+                "Loaded BC backbone; skipped %d BC-only keys "
+                "(metadata embeddings and head weights with different input size).",
                 len(result.unexpected_keys),
             )
-        _bc.freeze_batchnorm()
 
         self.features = _bc.features
-        self.actor_head = _bc.head
 
         with torch.no_grad():
             feat_size = self.features(
                 torch.zeros(1, 3, RESIZE_H, RESIZE_W)
             ).shape[1]
 
+        self.style_embedding = nn.Embedding(n_styles, style_embed_dim)
+        head_input_dim = feat_size + state_dim + style_embed_dim
+
+        self.actor_head = nn.Sequential(
+            nn.Linear(head_input_dim, 256), nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(256, 128), nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(128, 64), nn.ReLU(inplace=True),
+            nn.Linear(64, action_dim),
+        )
         self.critic_head = nn.Sequential(
-            nn.Linear(feat_size + state_dim, 256), nn.ReLU(inplace=True),
+            nn.Linear(head_input_dim, 256), nn.ReLU(inplace=True),
             nn.Linear(256, 64), nn.ReLU(inplace=True),
             nn.Linear(64, 1),
         )
+
         if log_std_init is not None:
-            self.log_std = nn.Parameter(torch.tensor(log_std_init,
-                                                     dtype=torch.float32))
+            self.log_std = nn.Parameter(
+                torch.tensor(log_std_init, dtype=torch.float32)
+            )
         else:
             self.log_std = nn.Parameter(torch.full((action_dim,), -0.5))
 
-    def train(self, mode: bool = True) -> "ActorCritic":
-        """Override to keep BN layers in eval mode regardless of global train/eval state.
+    def _feats(
+        self,
+        image: torch.Tensor,
+        state: torch.Tensor,
+        style: torch.Tensor,
+    ) -> torch.Tensor:
+        style_emb = self.style_embedding(style)
+        return torch.cat([self.features(image), state, style_emb], dim=1)
 
-        PyTorch's default .train() recurses into all submodules and would unfreeze
-        the BN running stats that freeze_batchnorm() locked at init time.
-        """
-        super().train(mode)
-        for m in self.features.modules():
-            if isinstance(m, nn.BatchNorm2d):
-                m.eval()
-        return self
-
-    def _feats(self, image: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
-        return torch.cat([self.features(image), state], dim=1)
-
-    def get_value(self, image: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
-        """Return critic value estimate."""
-        return self.critic_head(self._feats(image, state)).squeeze(-1)
+    def get_value(
+        self,
+        image: torch.Tensor,
+        state: torch.Tensor,
+        style: torch.Tensor,
+    ) -> torch.Tensor:
+        return self.critic_head(self._feats(image, state, style)).squeeze(-1)
 
     def get_action_and_value(
         self,
         image: torch.Tensor,
         state: torch.Tensor,
+        style: torch.Tensor,
         action: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Sample action (or evaluate given action) and return (act, log_prob, entropy, value)."""
-        x = self._feats(image, state)
+        """Sample an action (or evaluate a given action) and return
+        (action, log_prob, entropy, value)."""
+        x = self._feats(image, state, style)
         raw = self.actor_head(x)
         std = torch.exp(self.log_std.clamp(-3.0, 1.0))
         dist = Normal(raw, std)
@@ -185,9 +197,7 @@ class ActorCritic(nn.Module):
 
         eps = 1e-6
         lp = dist.log_prob(z)
-        lp[:, 0] = lp[:, 0] - torch.log(
-            1.0 - steer[:, 0] ** 2 + eps
-        )
+        lp[:, 0] = lp[:, 0] - torch.log(1.0 - steer[:, 0] ** 2 + eps)
         lp[:, 1] = lp[:, 1] - torch.log(
             throttle[:, 0] * (1.0 - throttle[:, 0]) + eps
         )
@@ -196,6 +206,145 @@ class ActorCritic(nn.Module):
         )
         log_prob = lp.sum(dim=1)
 
+        entropy = dist.entropy().sum(dim=1)
+        value = self.critic_head(x).squeeze(-1)
+        return act, log_prob, entropy, value
+
+
+# ---------------------------------------------------------------------------
+# MultiCamActorCritic
+# ---------------------------------------------------------------------------
+
+class MultiCamActorCritic(nn.Module):
+    """Actor-critic policy for the multi-camera sensor suite.
+
+    Uses the shared CNN backbone from MultiCamDriveNet. Actor and critic
+    heads are freshly initialized (BC head weights cannot transfer because
+    the multi-cam head input dimension differs from the BC single-cam head).
+    A style embedding is concatenated with the fused visual features and
+    state before both heads, identical to the single-camera ActorCritic.
+    """
+
+    def __init__(
+        self,
+        bc_state_dict: dict[str, torch.Tensor],
+        dropout: float = 0.3,
+        state_dim: int = 6,
+        action_dim: int = 3,
+        n_cameras: int = 3,
+        n_styles: int = 3,
+        style_embed_dim: int = 4,
+        log_std_init: list[float] | None = None,
+    ) -> None:
+        super().__init__()
+        from src.drivenet_multicam import MultiCamDriveNet
+
+        _mc = MultiCamDriveNet(
+            dropout=dropout, state_dim=state_dim,
+            action_dim=action_dim, n_cameras=n_cameras,
+        )
+        # Load only the CNN backbone from the BC checkpoint. We filter to
+        # 'features.*' keys to avoid a size-mismatch RuntimeError: the BC
+        # head was built for a single camera, so its first Linear layer has a
+        # different input dimension than the multi-camera head. strict=False
+        # skips missing/unexpected keys but NOT size mismatches, so we must
+        # pre-filter rather than rely on it to skip the head automatically.
+        backbone_state = {
+            k[len("features."):]: v
+            for k, v in bc_state_dict.items()
+            if k.startswith("features.")
+        }
+        _mc.shared_backbone.load_state_dict(backbone_state, strict=False)
+        log.info(
+            "MultiCamActorCritic: loaded %d backbone keys from BC checkpoint.",
+            len(backbone_state),
+        )
+
+        self.shared_backbone = _mc.shared_backbone
+        self.n_cameras = n_cameras
+
+        with torch.no_grad():
+            dummy = torch.zeros(1, 3, RESIZE_H, RESIZE_W)
+            feat_size = self.shared_backbone(dummy).shape[1]
+
+        self.style_embedding = nn.Embedding(n_styles, style_embed_dim)
+        head_input_dim = feat_size * n_cameras + state_dim + style_embed_dim
+
+        self.actor_head = nn.Sequential(
+            nn.Linear(head_input_dim, 256), nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(256, 128), nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(128, 64), nn.ReLU(inplace=True),
+            nn.Linear(64, action_dim),
+        )
+        self.critic_head = nn.Sequential(
+            nn.Linear(head_input_dim, 256), nn.ReLU(inplace=True),
+            nn.Linear(256, 64), nn.ReLU(inplace=True),
+            nn.Linear(64, 1),
+        )
+
+        if log_std_init is not None:
+            self.log_std = nn.Parameter(
+                torch.tensor(log_std_init, dtype=torch.float32)
+            )
+        else:
+            self.log_std = nn.Parameter(torch.full((action_dim,), -0.5))
+
+    def _feats(
+        self,
+        images: torch.Tensor,
+        state: torch.Tensor,
+        style: torch.Tensor,
+    ) -> torch.Tensor:
+        # images: (B, n_cameras, 3, H, W)
+        cam_feats = [self.shared_backbone(images[:, i]) for i in range(self.n_cameras)]
+        style_emb = self.style_embedding(style)
+        return torch.cat(cam_feats + [state, style_emb], dim=1)
+
+    def get_value(
+        self,
+        images: torch.Tensor,
+        state: torch.Tensor,
+        style: torch.Tensor,
+    ) -> torch.Tensor:
+        return self.critic_head(self._feats(images, state, style)).squeeze(-1)
+
+    def get_action_and_value(
+        self,
+        images: torch.Tensor,
+        state: torch.Tensor,
+        style: torch.Tensor,
+        action: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        x = self._feats(images, state, style)
+        raw = self.actor_head(x)
+        std = torch.exp(self.log_std.clamp(-3.0, 1.0))
+        dist = Normal(raw, std)
+
+        if action is None:
+            z = dist.rsample()
+        else:
+            eps = 1e-6
+            z_steer = torch.atanh(action[:, 0:1].clamp(-1 + eps, 1 - eps))
+            z_rest = torch.logit(action[:, 1:3].clamp(eps, 1 - eps))
+            z = torch.cat([z_steer, z_rest], dim=1)
+
+        steer = torch.tanh(z[:, 0:1])
+        throttle = torch.sigmoid(z[:, 1:2])
+        brake = torch.sigmoid(z[:, 2:3])
+        act = torch.cat([steer, throttle, brake], dim=1)
+
+        eps = 1e-6
+        lp = dist.log_prob(z)
+        lp[:, 0] = lp[:, 0] - torch.log(1.0 - steer[:, 0] ** 2 + eps)
+        lp[:, 1] = lp[:, 1] - torch.log(
+            throttle[:, 0] * (1.0 - throttle[:, 0]) + eps
+        )
+        lp[:, 2] = lp[:, 2] - torch.log(
+            brake[:, 0] * (1.0 - brake[:, 0]) + eps
+        )
+        log_prob = lp.sum(dim=1)
         entropy = dist.entropy().sum(dim=1)
         value = self.critic_head(x).squeeze(-1)
         return act, log_prob, entropy, value
@@ -219,10 +368,9 @@ class RolloutBuffer:
         self.n_steps = n_steps
         self.device = device
 
-        self.obs_images = torch.zeros(
-            n_steps, *obs_shape_img, dtype=torch.uint8,
-        )
+        self.obs_images = torch.zeros(n_steps, *obs_shape_img, dtype=torch.uint8)
         self.obs_states = torch.zeros(n_steps, *obs_shape_state)
+        self.styles = torch.zeros(n_steps, dtype=torch.long)
         self.actions = torch.zeros(n_steps, action_dim)
         self.log_probs = torch.zeros(n_steps)
         self.rewards = torch.zeros(n_steps)
@@ -238,17 +386,16 @@ class RolloutBuffer:
         self,
         obs_img: torch.Tensor,
         obs_state: torch.Tensor,
+        style: int,
         action: torch.Tensor,
         log_prob: float,
         reward: float,
         value: float,
         done: float,
     ) -> None:
-        """Append one transition to the buffer."""
-        self.obs_images[self.ptr] = (obs_img.squeeze(0) * 255).to(
-            torch.uint8
-        )
+        self.obs_images[self.ptr] = (obs_img.squeeze(0) * 255).to(torch.uint8)
         self.obs_states[self.ptr] = obs_state.squeeze(0)
+        self.styles[self.ptr] = style
         self.actions[self.ptr] = action.squeeze(0)
         self.log_probs[self.ptr] = log_prob
         self.rewards[self.ptr] = reward
@@ -274,23 +421,17 @@ class RolloutBuffer:
             else:
                 next_non_terminal = 1.0 - self.dones[t + 1].item()
                 next_value = self.values[t + 1].item()
-
             delta = (
                 self.rewards[t].item()
                 + gamma * next_value * next_non_terminal
                 - self.values[t].item()
             )
-            last_gae = (
-                delta + gamma * gae_lambda * next_non_terminal * last_gae
-            )
+            last_gae = delta + gamma * gae_lambda * next_non_terminal * last_gae
             self.advantages[t] = last_gae
-
         self.returns = self.advantages + self.values
 
-    def get_batches(
-        self, batch_size: int
-    ):
-        """Yield mini-batches of (images, states, actions, log_probs, advantages, returns)."""
+    def get_batches(self, batch_size: int):
+        """Yield mini-batches of training data from the filled buffer."""
         assert self.full, "Buffer not full"
         adv = self.advantages
         adv = (adv - adv.mean()) / (adv.std() + 1e-8)
@@ -301,6 +442,7 @@ class RolloutBuffer:
             yield (
                 self.obs_images[idx].float() / 255.0,
                 self.obs_states[idx],
+                self.styles[idx],
                 self.actions[idx],
                 self.log_probs[idx],
                 adv[idx],
@@ -308,7 +450,6 @@ class RolloutBuffer:
             )
 
     def reset(self) -> None:
-        """Reset pointer so buffer can be refilled."""
         self.ptr = 0
         self.full = False
 
@@ -343,10 +484,11 @@ def ppo_update(
     use_amp = scaler is not None
 
     for _ in range(n_epochs):
-        for (img_b, state_b, act_b,
+        for (img_b, state_b, style_b, act_b,
              old_lp_b, adv_b, ret_b) in buffer.get_batches(batch_size):
             img_b = img_b.to(device)
             state_b = state_b.to(device)
+            style_b = style_b.to(device)
             act_b = act_b.to(device)
             old_lp_b = old_lp_b.to(device)
             adv_b = adv_b.to(device)
@@ -354,16 +496,12 @@ def ppo_update(
 
             with torch.amp.autocast("cuda", enabled=use_amp):
                 _, new_lp, entropy, new_value = model.get_action_and_value(
-                    img_b, state_b, action=act_b,
+                    img_b, state_b, style_b, action=act_b,
                 )
-
                 ratio = torch.exp(new_lp - old_lp_b)
                 surr1 = ratio * adv_b
-                surr2 = (
-                    torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * adv_b
-                )
+                surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * adv_b
                 policy_loss = -torch.min(surr1, surr2).mean()
-
                 value_loss = 0.5 * ((new_value - ret_b) ** 2).mean()
                 neg_entropy = -entropy.mean()
                 loss = (

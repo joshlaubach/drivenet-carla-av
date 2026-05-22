@@ -1,27 +1,65 @@
 # Evaluation Configuration
 # Canonical source for all parameters used by EvaluationAgent and Notebook 04.
 
+# Towns held out from PPO training. Evaluated one at a time; EvaluationAgent
+# cycles through all three automatically.
+eval_towns:
+  - Town01
+  - Town03
+  - Town05
+
 eval_weathers:
   - ClearNoon
   - HardRainNoon
   - ClearNight
 
-episodes_per_condition: 3
+episodes_per_condition: 10
 max_steps_per_episode: 2000
 grp_sampling: 2.0
 
-# Image crop constants (300-px-tall eval camera, same as PPO)
+# Sensor suites to evaluate. Each suite maps to a separate set of model
+# checkpoints. Results are pooled into eval_results.json for PSM analysis.
+sensor_suites:
+  - single_cam
+  - multi_cam
+  - lidar
+
+# Image crop constants (300-px-tall eval camera)
 crop:
   ppo_crop_top: 65
   ppo_crop_bottom: 265
   bc_crop_top: 65
   bc_crop_bottom: 265
 
-# BC model specs (PPO models are discovered per-town at runtime)
-model_specs:
-  - name: BC_model
-    file: BC_model_best.pt
-    type: bc
-    meta: true
+# BC model to evaluate (one per sensor suite; file is the single_cam baseline)
+bc_model_specs:
+  - name: BC_model_single_cam
+    file: BC_model_single_cam_best.pt
+    sensor_suite: single_cam
+  - name: BC_model_multi_cam
+    file: BC_model_multi_cam_best.pt
+    sensor_suite: multi_cam
+  - name: BC_model_lidar
+    file: BC_model_lidar_best.pt
+    sensor_suite: lidar
 
-meta_dims: [6, 6, 3, 3, 3]
+meta_dims: [6, 3, 3, 3, 3]   # weather, road_type, tod, traffic, style
+
+# Driving style integer codes (must match bc.yaml and ppo.yaml)
+style_codes:
+  chill: 0
+  standard: 1
+  hurry: 2
+
+# Video recording settings (NB04 side-by-side agent + spectator view)
+video:
+  enabled: true
+  fps: 20
+  agent_display_h: 300    # height of agent-view panel in the output video
+  agent_display_w: 600    # width  of agent-view panel
+  spectator_h: 300        # height of spectator-view panel
+  spectator_w: 400        # width  of spectator-view panel
+  # Spectator camera offset from ego vehicle (third-person chase cam)
+  spectator_x: -8.0
+  spectator_z: 5.0
+  spectator_pitch: -15.0

@@ -1,4 +1,12 @@
-"""PyTorch dataset and GPU-based augmentation for the DriveNet pipeline."""
+"""PyTorch dataset and GPU-based augmentation for the DriveNet pipeline.
+
+Raw state layout stored in .npz chunks (5 values, un-normalized):
+    [speed_kmh, heading_deg, speed_limit_kmh, lane_count, is_junction]
+
+Processed state fed to the model (6 values, normalized):
+    [speed_norm, sin_heading, cos_heading,
+     speed_limit_norm, lane_count_norm, is_junction]
+"""
 
 from __future__ import annotations
 
@@ -18,7 +26,8 @@ class DrivingDataset(Dataset):
     images : ndarray
         Full image array (N, H, W, 3) uint8.
     states : ndarray
-        Raw states (N, 2) float32 -- [speed_kmh, heading_deg].
+        Raw states (N, 5) float32 --
+        [speed_kmh, heading_deg, speed_limit_kmh, lane_count, is_junction].
     actions : ndarray
         Expert actions (N, 3) float32 -- [steer, throttle, brake].
     meta : ndarray
@@ -41,9 +50,13 @@ class DrivingDataset(Dataset):
         raw = states[indices].copy()
         speed_norm = raw[:, 0:1] / SPEED_NORM
         heading_rad = np.deg2rad(raw[:, 1:2])
+        speed_limit_norm = np.clip(raw[:, 2:3] / 130.0, 0.0, 1.0)
+        lane_count_norm = raw[:, 3:4] / 4.0
+        is_junction = raw[:, 4:5]
         self.states = torch.from_numpy(
             np.hstack(
-                [speed_norm, np.sin(heading_rad), np.cos(heading_rad)]
+                [speed_norm, np.sin(heading_rad), np.cos(heading_rad),
+                 speed_limit_norm, lane_count_norm, is_junction]
             ).astype(np.float32)
         )
 

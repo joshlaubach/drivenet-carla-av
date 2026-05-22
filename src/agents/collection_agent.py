@@ -77,6 +77,7 @@ class DataCollectionAgent:
         seed: int | None = None,
         carla_exe: str | Path | None = None,
         enable_follow_car: bool = True,
+        enable_viz: bool = False,
     ) -> None:
         self.cfg = load_config("collection")
         require_keys(
@@ -102,7 +103,9 @@ class DataCollectionAgent:
         self.port = port
         self.enable_follow_car = enable_follow_car
 
-        self.carla_exe = Path(carla_exe) if carla_exe else _DEFAULT_CARLA_EXE
+        self.carla_exe    = Path(carla_exe) if carla_exe else _DEFAULT_CARLA_EXE
+        self.enable_viz   = enable_viz
+        self._viz         = None  # DriveNetVisualizer, created lazily in run()
 
         _seed = seed if seed is not None else self.cfg["seed"]
         random.seed(_seed)
@@ -123,6 +126,10 @@ class DataCollectionAgent:
 
         Requires CARLA to be running with the target town already loaded.
         """
+        if self.enable_viz:
+            from src.visualizer import DriveNetVisualizer
+            self._viz = DriveNetVisualizer()
+
         env = CarlaEnv(
             host=self.host,
             port=self.port,
@@ -133,10 +140,18 @@ class DataCollectionAgent:
         try:
             self._collect_all_conditions(env)
         finally:
+            log.info("run(): collect loop done -- destroying follow car ...")
             self._destroy_follow_car()
+            log.info("run(): flushing buffer ...")
             self._flush_buffer()
+            log.info("run(): saving collision log ...")
             self._save_collision_log()
+            log.info("run(): closing env ...")
             env.close()
+            log.info("run(): env closed")
+            if self._viz is not None:
+                self._viz.close()
+                self._viz = None
         log.info(
             "Collection complete for %s. %d chunks saved to %s.",
             self.town, self._chunk_index, self.data_dir,
@@ -342,7 +357,7 @@ class DataCollectionAgent:
             self._apply_weather(env, weather, tod)
             npcs = self._spawn_npcs(env, traffic_counts[traffic])
             try:
-                self._collect_condition(env, weather, tod, traffic)
+                self._collect_condition(env, weather, tod, traffic, i + 1)
             finally:
                 self._destroy_npcs(npcs)
 
@@ -354,6 +369,7 @@ class DataCollectionAgent:
         weather: str,
         tod: str,
         traffic: str,
+        condition_idx: int = 0,
     ) -> None:
         """Collect frames_per_condition frames for one weather/tod/traffic combo."""
         frames_saved = 0
@@ -373,6 +389,10 @@ class DataCollectionAgent:
                 log.warning("reset() failed (attempt %d): %s", attempts, exc)
                 continue
 
+            # Reattach viz cameras to the newly spawned vehicle
+            if self._viz is not None:
+                self._viz.reattach(env.world, env.vehicle)
+
             env.vehicle.set_autopilot(True, env.traffic_manager.get_port())
 
             # Spawn follow car behind the ego
@@ -391,6 +411,19 @@ class DataCollectionAgent:
                 except RuntimeError as exc:
                     log.warning("tick/obs failed: %s -- resetting.", exc)
                     break
+
+                if self._viz is not None:
+                    self._viz.update({
+                        "town":         self.town,
+                        "weather":      weather,
+                        "tod":          tod,
+                        "traffic":      traffic,
+                        "condition":    condition_idx,
+                        "frames_saved": frames_saved,
+                        "frames_total": self.frames_per_condition,
+                        "chunks_saved": self._chunk_index,
+                        "speed_kmh":    env._speed_kmh,
+                    })
 
                 frame = self._read_frame(env, obs, weather, tod, traffic)
                 self._buffer.append(frame)
@@ -576,38 +609,73 @@ class DataCollectionAgent:
         tl_int = int(tl_state) if tl_state is not None else 3  # 3 = Off
 
         speed_limit = env.vehicle.get_speed_limit()
+        road_type, lane_count, is_junction = self._get_road_features(env)
 
-        road_type = self._get_road_type(env)
-
+        # Raw state stores un-normalized values so that DrivingDataset can
+        # apply its own normalization. Layout:
+        #   [speed_kmh, heading_deg, speed_limit_kmh, lane_count, is_junction]
         return {
             "image": obs["camera"],
-            "state": np.array([speed_kmh, heading_deg], dtype=np.float32),
+            "state": np.array(
+                [speed_kmh, heading_deg, float(speed_limit),
+                 float(lane_count), float(is_junction)],
+                dtype=np.float32,
+            ),
             "action": np.array([ctrl.steer, ctrl.throttle, ctrl.brake], dtype=np.float32),
             "location": np.array([loc.x, loc.y], dtype=np.float32),
             "tl_state": np.uint8(tl_int),
             "speed_limit": np.float32(speed_limit),
             "weather_preset": weather,
-            "town": self.town,
             "road_type": road_type,
             "time_of_day": tod,
             "traffic_density": traffic,
+            "style": "standard",
         }
 
-    def _get_road_type(self, env: CarlaEnv) -> str:
-        """Classify the current road segment as highway, rural, or urban."""
+    def _get_road_features(self, env: CarlaEnv) -> tuple[str, int, int]:
+        """Return road type, lane count, and junction flag at the ego's location.
+
+        Returns
+        -------
+        road_type : str
+            One of "highway", "rural", or "urban".
+        lane_count : int
+            Total number of drivable lanes (capped at 4).
+        is_junction : int
+            1 if the vehicle is at a junction, 0 otherwise.
+        """
         try:
             wp = env.world.get_map().get_waypoint(
                 env.vehicle.get_location(),
                 project_to_road=True,
                 lane_type=carla.LaneType.Driving,
             )
-            if wp.is_junction:
-                return "urban"
-            if wp.lane_width > 4.5:
-                return "highway"
-            return "rural"
+            is_junction = int(wp.is_junction)
+
+            lane_count = 1
+            wp_iter = wp.get_left_lane()
+            while (wp_iter is not None
+                   and wp_iter.lane_type == carla.LaneType.Driving
+                   and lane_count < 4):
+                lane_count += 1
+                wp_iter = wp_iter.get_left_lane()
+            wp_iter = wp.get_right_lane()
+            while (wp_iter is not None
+                   and wp_iter.lane_type == carla.LaneType.Driving
+                   and lane_count < 4):
+                lane_count += 1
+                wp_iter = wp_iter.get_right_lane()
+
+            if is_junction:
+                road_type = "urban"
+            elif wp.lane_width > 4.5:
+                road_type = "highway"
+            else:
+                road_type = "rural"
+
+            return road_type, lane_count, is_junction
         except RuntimeError:
-            return "urban"
+            return "urban", 1, 0
 
     # -- Weather / NPC tools ---------------------------------------------------
 
@@ -705,8 +773,8 @@ class _FrameBuffer:
             "tl_states": np.array([f["tl_state"] for f in self._frames], dtype=np.uint8),
             "speed_limits": np.array([f["speed_limit"] for f in self._frames], dtype=np.float32),
             "weather_preset": np.array([f["weather_preset"] for f in self._frames]),
-            "town": np.array([f["town"] for f in self._frames]),
             "road_type": np.array([f["road_type"] for f in self._frames]),
             "time_of_day": np.array([f["time_of_day"] for f in self._frames]),
             "traffic_density": np.array([f["traffic_density"] for f in self._frames]),
+            "style": np.array([f["style"] for f in self._frames]),
         }

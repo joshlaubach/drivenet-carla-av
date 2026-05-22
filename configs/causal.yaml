@@ -1,15 +1,66 @@
 # Causal Analysis Configuration
 # Canonical source for all parameters used by CausalAnalysisAgent and Notebook 05.
 
-n_bootstrap: 10000
+n_bootstrap: 1000
 min_treated: 20
 random_seed: 42
 
-# Treatment definitions using a declarative filter DSL.
-# The agent reconstructs filter callables from {field, op, value} at runtime.
-# Supported operators: eq (equality), in (set membership).
-# Lists of conditions are combined with AND.
-treatments:
+# PSM is run on PPO data only. BC model records are excluded before analysis.
+ppo_only: true
+
+# Treatments are organized into two tiers.
+# Primary treatments compare sensor suites; Rosenbaum sensitivity bounds are
+# applied only to these because they make the core claim of the experiment.
+# Secondary treatments study condition effects within the PPO data.
+#
+# Confounders available in eval records: weather, town (road_type and traffic
+# density are not tracked per episode and are therefore not included).
+
+primary_treatments:
+  # Single-camera (control) vs. multi-camera (treated)
+  - name: sensor_single_vs_multi
+    outcome: route_completion
+    treated_condition:
+      field: sensor_suite
+      op: eq
+      value: multi_cam
+    control_condition:
+      field: sensor_suite
+      op: eq
+      value: single_cam
+    covariates: [weather_code, town_code]
+    rosenbaum: true
+
+  # Single-camera (control) vs. lidar (treated)
+  - name: sensor_single_vs_lidar
+    outcome: route_completion
+    treated_condition:
+      field: sensor_suite
+      op: eq
+      value: lidar
+    control_condition:
+      field: sensor_suite
+      op: eq
+      value: single_cam
+    covariates: [weather_code, town_code]
+    rosenbaum: true
+
+  # Multi-camera (control) vs. lidar (treated)
+  - name: sensor_multi_vs_lidar
+    outcome: route_completion
+    treated_condition:
+      field: sensor_suite
+      op: eq
+      value: lidar
+    control_condition:
+      field: sensor_suite
+      op: eq
+      value: multi_cam
+    covariates: [weather_code, town_code]
+    rosenbaum: true
+
+secondary_treatments:
+  # Effect of rain on route completion (within PPO data)
   - name: rain
     outcome: route_completion
     treated_condition:
@@ -20,8 +71,10 @@ treatments:
       field: weather
       op: eq
       value: ClearNoon
-    covariates: [model_type_code, town_code]
+    covariates: [sensor_suite_code, town_code]
+    rosenbaum: false
 
+  # Effect of night driving on route completion
   - name: night
     outcome: route_completion
     treated_condition:
@@ -32,43 +85,19 @@ treatments:
       field: weather
       op: eq
       value: ClearNoon
-    covariates: [model_type_code, town_code]
+    covariates: [sensor_suite_code, town_code]
+    rosenbaum: false
 
-  - name: urban
-    outcome: collision_rate
-    treated_condition:
-      field: town
-      op: in
-      value: [Town01, Town03]
-    control_condition:
-      field: town
-      op: in
-      value: [Town05]
-    covariates: [weather_code, model_type_code]
-
-  - name: ppo
+  # Effect of aggressive driving style (hurry) vs. smooth (chill)
+  - name: style_hurry_vs_chill
     outcome: route_completion
     treated_condition:
-      field: model_type
+      field: driving_style
       op: eq
-      value: ppo
+      value: hurry
     control_condition:
-      field: model_type
+      field: driving_style
       op: eq
-      value: bc
-    covariates: [weather_code, town_code]
-
-  - name: driving_style
-    outcome: route_completion
-    treated_condition:
-      - field: model_type
-        op: eq
-        value: ppo
-      - field: driving_style
-        op: eq
-        value: chill
-    control_condition:
-      field: model_type
-      op: eq
-      value: bc
-    covariates: [weather_code, town_code]
+      value: chill
+    covariates: [weather_code, sensor_suite_code, town_code]
+    rosenbaum: false

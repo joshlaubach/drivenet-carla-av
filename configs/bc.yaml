@@ -13,7 +13,7 @@ dropout: 0.3
 loss_weights: [1.0, 1.0, 5.0]   # steer, throttle, brake (brake upweighted 5x)
 test_fraction: 0.15
 val_fraction: 0.10
-meta_dims: [6, 6, 3, 3, 3]      # weather, town, road_type, tod, traffic
+meta_dims: [6, 3, 3, 3, 3]      # weather, road_type, tod, traffic, style
 
 model_name: BC_model
 
@@ -25,14 +25,6 @@ weather_codes:
   HardRainNoon: 3
   ClearSunset: 4
   ClearNight: 5
-
-town_codes:
-  Town01: 0
-  Town02: 1
-  Town03: 2
-  Town04: 3
-  Town05: 4
-  Town10HD: 5
 
 road_type_codes:
   highway: 0
@@ -48,3 +40,10 @@ traffic_codes:
   low: 0
   medium: 1
   high: 2
+
+# Expert autopilot data is always collected in standard style.
+# PPO fine-tuning varies this token to produce different driving personalities.
+style_codes:
+  chill: 0
+  standard: 1
+  hurry: 2

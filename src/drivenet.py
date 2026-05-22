@@ -1,7 +1,9 @@
 """DriveNet: Condition-aware CNN policy for autonomous driving.
 
-5-layer convolutional feature extractor with optional metadata embeddings
-and a 4-layer MLP head producing [steer, throttle, brake].
+A 5-layer convolutional feature extractor with GroupNorm (which works
+correctly at any batch size and does not shift behavior between training
+and inference, making it better suited for sim-to-real transfer than
+BatchNorm) and a 4-layer MLP head that outputs [steer, throttle, brake].
 """
 
 from __future__ import annotations
@@ -11,50 +13,56 @@ import torch.nn as nn
 
 
 class DriveNet(nn.Module):
-    """Condition-aware CNN policy that maps (image, state, metadata) to actions.
+    """Condition-aware CNN policy mapping (image, state, metadata) to actions.
 
     Parameters
     ----------
     dropout : float
-        Dropout probability in the MLP head.
+        Dropout probability applied in the MLP head.
     state_dim : int
-        Dimension of the state vector (default 3: speed, sin_heading, cos_heading).
+        Dimension of the continuous state vector. Default is 6:
+        (speed_norm, sin_heading, cos_heading, speed_limit_norm,
+        lane_count_norm, is_junction).
     action_dim : int
         Number of action outputs (default 3: steer, throttle, brake).
     meta_dims : list[int] | None
-        Number of categories per metadata field for embedding layers.
-        ``None`` disables metadata embeddings (backward-compatible).
+        Number of categories per metadata field, used to build learned
+        embedding layers. Default fields when not None:
+        weather (6), road_type (3), time_of_day (3),
+        traffic_density (3), driving_style (3).
+        Pass None to disable all metadata embeddings.
     """
 
     def __init__(
         self,
         dropout: float = 0.3,
-        state_dim: int = 3,
+        state_dim: int = 6,
         action_dim: int = 3,
         meta_dims: list[int] | None = None,
     ) -> None:
         super().__init__()
 
+        # GroupNorm groups are chosen so that channels / groups is an integer
+        # in the range [3, 8], which is the stable operating range for GN.
         self.features = nn.Sequential(
             nn.Conv2d(3, 24, kernel_size=5, stride=2),
-            nn.BatchNorm2d(24),
+            nn.GroupNorm(4, 24),
             nn.ReLU(inplace=True),
             nn.Conv2d(24, 36, kernel_size=5, stride=2),
-            nn.BatchNorm2d(36),
+            nn.GroupNorm(6, 36),
             nn.ReLU(inplace=True),
             nn.Conv2d(36, 48, kernel_size=5, stride=2),
-            nn.BatchNorm2d(48),
+            nn.GroupNorm(8, 48),
             nn.ReLU(inplace=True),
             nn.Conv2d(48, 64, kernel_size=3, stride=1),
-            nn.BatchNorm2d(64),
+            nn.GroupNorm(8, 64),
             nn.ReLU(inplace=True),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.BatchNorm2d(64),
+            nn.GroupNorm(8, 64),
             nn.ReLU(inplace=True),
             nn.Flatten(),
         )
 
-        # Compute flattened feature size from a dummy forward pass
         with torch.no_grad():
             from src.preprocessing import RESIZE_H, RESIZE_W
             dummy = torch.zeros(1, 3, RESIZE_H, RESIZE_W)
@@ -63,7 +71,6 @@ class DriveNet(nn.Module):
         self.backbone_output_dim: int = feat_size + state_dim
         self._feat_size: int = feat_size
 
-        # Optional condition-metadata embeddings
         self.meta_dims = meta_dims
         meta_total = 0
         if meta_dims is not None:
@@ -87,27 +94,14 @@ class DriveNet(nn.Module):
             nn.Linear(64, action_dim),
         )
 
-    def freeze_batchnorm(self) -> None:
-        """Freeze BN running stats for PPO fine-tuning.
-
-        BatchNorm running stats continue updating in train mode, which
-        destabilizes PPO rollouts where minibatches are small and highly
-        correlated. Call this after loading BC weights and before PPO training.
-        """
-        for m in self.features.modules():
-            if isinstance(m, nn.BatchNorm2d):
-                m.eval()
-                for p in m.parameters():
-                    p.requires_grad_(False)
-
     def extract_features(
         self, image: torch.Tensor, state: torch.Tensor
     ) -> torch.Tensor:
         """Return the pre-head feature vector: cat([CNN(image), state]).
 
-        Shape: (B, backbone_output_dim) = (B, feat_size + state_dim).
-        Used by ActorCritic to share the visual backbone between actor
-        and critic heads. Meta embeddings are NOT included.
+        Shape: (B, backbone_output_dim). Metadata embeddings are not
+        included. Used by ActorCritic to share the visual backbone
+        between actor and critic heads.
         """
         return torch.cat([self.features(image), state], dim=1)
 
@@ -124,7 +118,8 @@ class DriveNet(nn.Module):
             if meta is None:
                 raise ValueError(
                     "DriveNet was built with meta_dims but received meta=None. "
-                    "Either pass metadata tensors or rebuild the model with meta_dims=None."
+                    "Either pass metadata tensors or rebuild the model with "
+                    "meta_dims=None."
                 )
             parts += [emb(meta[:, i]) for i, emb in enumerate(self.meta_embeddings)]
         x = torch.cat(parts, dim=1)

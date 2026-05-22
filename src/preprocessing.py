@@ -63,20 +63,26 @@ def preprocess_obs(obs: dict[str, np.ndarray]) -> tuple[torch.Tensor, torch.Tens
 def encode_metadata(
     data: dict[str, np.ndarray],
     weather_codes: dict[str, int],
-    town_codes: dict[str, int],
     road_type_codes: dict[str, int],
     tod_codes: dict[str, int],
     traffic_codes: dict[str, int],
+    style_codes: dict[str, int],
 ) -> np.ndarray:
     """Map string metadata arrays to integer codes.
+
+    Column layout (matches meta_dims in bc.yaml):
+        0: weather_preset
+        1: road_type
+        2: time_of_day
+        3: traffic_density
+        4: style
 
     Parameters
     ----------
     data : dict-like
-        Must contain string arrays for ``weather_preset``, ``town``,
-        ``road_type``, ``time_of_day``, and ``traffic_density``.
+        Must contain string arrays for each metadata field.
     *_codes : dict
-        Mapping from string names to integer codes.
+        Mapping from string names to integer codes for each field.
 
     Returns
     -------
@@ -89,19 +95,19 @@ def encode_metadata(
         dtype=np.int8,
     )
     meta[:, 1] = np.array(
-        [town_codes[t] for t in data["town"].astype(str)],
-        dtype=np.int8,
-    )
-    meta[:, 2] = np.array(
         [road_type_codes[r] for r in data["road_type"].astype(str)],
         dtype=np.int8,
     )
-    meta[:, 3] = np.array(
+    meta[:, 2] = np.array(
         [tod_codes[t] for t in data["time_of_day"].astype(str)],
         dtype=np.int8,
     )
-    meta[:, 4] = np.array(
+    meta[:, 3] = np.array(
         [traffic_codes[t] for t in data["traffic_density"].astype(str)],
+        dtype=np.int8,
+    )
+    meta[:, 4] = np.array(
+        [style_codes[s] for s in data["style"].astype(str)],
         dtype=np.int8,
     )
     return meta

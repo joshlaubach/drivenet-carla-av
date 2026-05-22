@@ -11,9 +11,11 @@ REM  -benchmark           Enables fixed-timestep mode for stable
 REM                        synchronous data collection
 REM  -windowed            Runs in a window instead of fullscreen
 REM  -ResX=800 -ResY=600  Small viewport to save GPU memory
-REM  -dx12                 Use DirectX 12 to avoid camera sensor deadlocks
-REM                        observed with -dx11 on RTX 5080 (Blackwell).
-REM                        Keep all scripts on the same RHI flag.
+REM  -dx12                 Use DirectX 12.  -dx11 deadlocks the camera
+REM                        rendering pipeline on RTX 5080 (Blackwell) after
+REM                        ~5 frames; D3D12 avoids the deadlock and also
+REM                        permits client.load_world() at runtime.  Keep
+REM                        all scripts on the same RHI flag.
 REM ================================================================
 
 set DXGI_GPU_PREFERENCE=2

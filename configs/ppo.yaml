@@ -1,6 +1,20 @@
 # PPO Fine-Tuning Configuration
 # Canonical source for all parameters used by PPOAgent and Notebook 03.
 
+# Towns used for training. PPO cycles through these sequentially, one
+# rollout batch per town per update. Held-out eval towns are in eval.yaml.
+training_towns:
+  - Town02
+  - Town04
+  - Town06
+  - Town10HD
+
+# Driving style integer codes (must match bc.yaml style_codes).
+style_codes:
+  chill: 0
+  standard: 1
+  hurry: 2
+
 seed: 42
 dropout: 0.3
 
@@ -19,8 +33,13 @@ n_epochs_ppo: 4
 gamma: 0.99
 gae_lambda: 0.95
 total_timesteps: 200000
-curriculum_switch_step: 50000
 max_grad_norm: 0.5
+
+# Curriculum gate: weather expands from phase 1 to phase 2 only when BOTH
+# conditions are met -- a minimum step count (to ensure enough experience)
+# and a mean episode length threshold (to ensure the policy is ready).
+curriculum_min_steps: 50000
+curriculum_perf_threshold: 800   # mean episode length in steps
 
 # Image crop for 300-px-tall PPO camera images
 crop_top: 65
