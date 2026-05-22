@@ -36,7 +36,7 @@ def test_bc_required_keys() -> None:
         ["seed", "batch_size", "lr", "weight_decay", "max_epochs",
          "early_stop_patience", "lr_patience", "lr_factor", "dropout",
          "loss_weights", "test_fraction", "val_fraction", "meta_dims",
-         "model_name", "weather_codes", "town_codes", "road_type_codes",
+         "model_name", "weather_codes", "road_type_codes",
          "tod_codes", "traffic_codes"],
         "bc",
     )
@@ -49,7 +49,7 @@ def test_ppo_required_keys() -> None:
         ["seed", "dropout", "cam_w", "cam_h", "lr", "clip_eps",
          "entropy_coef", "value_loss_coef", "n_steps", "batch_size",
          "n_epochs_ppo", "gamma", "gae_lambda", "total_timesteps",
-         "curriculum_switch_step", "max_grad_norm", "crop_top",
+         "curriculum_min_steps", "max_grad_norm", "crop_top",
          "crop_bottom", "weather_phase1", "weather_phase2",
          "reward_profiles"],
         "ppo",
@@ -61,7 +61,7 @@ def test_eval_required_keys() -> None:
     require_keys(
         cfg,
         ["eval_weathers", "episodes_per_condition",
-         "max_steps_per_episode", "grp_sampling", "model_specs",
+         "max_steps_per_episode", "grp_sampling", "bc_model_specs",
          "meta_dims", "crop"],
         "eval",
     )
@@ -71,7 +71,7 @@ def test_causal_required_keys() -> None:
     cfg = load_config("causal")
     require_keys(
         cfg,
-        ["n_bootstrap", "min_treated", "random_seed", "treatments"],
+        ["n_bootstrap", "min_treated", "random_seed", "primary_treatments"],
         "causal",
     )
 
