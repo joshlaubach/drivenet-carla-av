@@ -1,5 +1,7 @@
 # DriveNet: From Imitation to Autonomy
 
+[![CI](https://github.com/joshlaubach/drivenet-carla-av/actions/workflows/ci.yml/badge.svg)](https://github.com/joshlaubach/drivenet-carla-av/actions/workflows/ci.yml)
+
 An end-to-end autonomous driving system built on CARLA 0.9.16. The project
 progresses through five stages: collecting expert driving data across diverse
 conditions, training a condition-aware convolutional policy via behavior cloning,
@@ -46,6 +48,7 @@ CARLA AV/
     scripts/
         launch_carla.bat           CARLA launch profile for this repo (-dx12)
         run_collection.bat         Batch data collection across all towns
+        collect_one_town.py        Single-town collection CLI (NB01 invokes per town)
         diagnose_startup_matrix.py Startup crash diagnostics
     src/
         __init__.py
@@ -213,10 +216,13 @@ DriveNet is a 5-layer CNN with an MLP head:
 pip install -r requirements.txt
 ```
 
-> **RTX 5080 (Blackwell) constraint**: In-place map switching crashes CARLA on
-> this GPU. Notebooks 01, 03, and 04 require CARLA to be running. NB01 handles
-> CARLA restarts automatically. NB03 and NB04 require you to restart CARLA
-> manually between towns. NB02 and NB05 are offline (no CARLA needed).
+> **RTX 5080 (Blackwell) constraint**: In-place map switching is unreliable on
+> this GPU when sensor cycles are involved, and libcarla's Boost.Asio streaming
+> threads outlive `del client`, so a long-lived parent process can't safely
+> drive multiple towns. NB01 sidesteps both issues by spawning a fresh
+> subprocess per town -- the OS reaps the threads on subprocess exit. NB03 and
+> NB04 still require you to restart CARLA manually between towns. NB02 and NB05
+> are offline (no CARLA needed).
 
 ## Running Tests
 
@@ -231,11 +237,13 @@ running on localhost:2000.
 
 ### Step 1: Data Collection (NB01) -- ~6 hours, all 6 towns
 
-NB01 handles CARLA restarts internally via `restart_carla_and_reconnect()`.
-No manual intervention is needed between towns.
+NB01's collection cell loops the six towns and invokes
+`scripts/collect_one_town.py` once per town as a subprocess.  Each subprocess
+launches CARLA, runs the full 54-condition collection for that town, and
+shuts CARLA down before exiting -- no manual intervention between towns.
 
 ```bash
-# NB01 launches CARLA itself -- do NOT start CARLA beforehand
+# Do NOT start CARLA beforehand; the subprocess manages CARLA's lifecycle
 jupyter notebook notebooks/01_data_collection.ipynb
 # Run all cells. Output: data/{Town}/chunk_XXXX.npz (324 conditions, ~97k frames)
 ```
@@ -295,8 +303,10 @@ jupyter notebook notebooks/05_causal_analysis.ipynb
 
 ## CARLA Launch Reference
 
-Use `-dx12` on RTX 5080 Blackwell. Do not call `client.load_world()` at runtime.
-Restart CARLA between towns instead.
+Use `-dx12` on RTX 5080 Blackwell.  In-place `client.load_world()` after a
+sensor cycle aborts CARLA on this hardware; for multi-town workflows kill the
+CARLA process between towns and relaunch fresh (NB01 does this for you via
+subprocess-per-town).
 
 ```bash
 # Option A: Use the repo launch script (headless-friendly, low quality viewport)
