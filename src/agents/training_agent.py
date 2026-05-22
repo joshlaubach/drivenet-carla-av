@@ -31,8 +31,8 @@ from src.carla_env import CarlaEnv
 from src.config import load_config, require_keys
 from src.dataset import DrivingDataset, GPUAugmenter
 from src.drivenet import DriveNet
-from src.drivenet_multicam import MultiCamDriveNet
 from src.drivenet_lidar import LidarDriveNet
+from src.drivenet_multicam import MultiCamDriveNet
 from src.preprocessing import crop_and_resize, encode_metadata
 from src.training import evaluate, train_model
 

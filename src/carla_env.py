@@ -8,7 +8,7 @@ import gymnasium
 import numpy as np
 from gymnasium import spaces
 
-from src.drivenet_lidar import points_to_bev, RESIZE_H, RESIZE_W
+from src.drivenet_lidar import RESIZE_H, RESIZE_W, points_to_bev
 
 # Camera transforms for the multi-camera suite.
 # Front camera looks straight ahead. Left and right cameras are mounted

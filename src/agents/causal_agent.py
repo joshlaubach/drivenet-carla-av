@@ -394,7 +394,6 @@ class CausalAnalysisAgent:
         try:
             import matplotlib.pyplot as plt
             from matplotlib.backends.backend_pdf import PdfPages
-            import matplotlib.gridspec as gridspec
         except ImportError:
             log.warning("matplotlib not available -- skipping PDF report.")
             return

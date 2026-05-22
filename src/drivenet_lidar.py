@@ -20,7 +20,6 @@ import torch.nn as nn
 from src.drivenet import DriveNet
 from src.preprocessing import RESIZE_H, RESIZE_W
 
-
 # BEV grid parameters. The grid covers a 40 m x 40 m patch centered on
 # the ego vehicle and is downsampled to the same spatial resolution as
 # the camera input so the CNN backbone can be reused without changes.

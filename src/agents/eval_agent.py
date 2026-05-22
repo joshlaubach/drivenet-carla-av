@@ -34,7 +34,7 @@ import subprocess
 import time
 import weakref
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Queue
 from typing import Any
 
 import carla
@@ -47,8 +47,8 @@ from src.carla_env import CarlaEnv
 from src.carla_utils import make_weather
 from src.config import load_config, require_keys
 from src.drivenet import DriveNet
-from src.drivenet_multicam import MultiCamDriveNet
 from src.drivenet_lidar import LidarDriveNet
+from src.drivenet_multicam import MultiCamDriveNet
 from src.ppo import ActorCritic, MultiCamActorCritic
 from src.preprocessing import RESIZE_H, RESIZE_W
 
