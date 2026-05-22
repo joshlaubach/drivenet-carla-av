@@ -20,11 +20,12 @@ Actor outputs are in [-1, 1].  Use FSDNet.to_carla(raw) to remap:
   throttle_raw → [0,  1]  ((raw + 1) / 2)
   brake_raw    → [0,  1]  ((raw + 1) / 2)
 """
+
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
-from torchvision.models import resnet18, ResNet18_Weights
+from torchvision.models import ResNet18_Weights, resnet18
 
 # ---------------------------------------------------------------------------
 # Constants

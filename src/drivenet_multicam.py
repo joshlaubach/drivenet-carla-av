@@ -16,7 +16,6 @@ import torch
 import torch.nn as nn
 
 from src.drivenet import DriveNet
-from src.preprocessing import RESIZE_H, RESIZE_W
 
 
 class MultiCamDriveNet(nn.Module):
@@ -105,8 +104,6 @@ class MultiCamDriveNet(nn.Module):
         -------
         Tensor, shape (B, 3) -- [steer, throttle, brake]
         """
-        B = images.shape[0]
-
         # Process each camera through the shared backbone
         cam_feats = []
         for i in range(self.n_cameras):
