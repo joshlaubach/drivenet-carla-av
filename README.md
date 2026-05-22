@@ -2,12 +2,13 @@
 
 [![CI](https://github.com/joshlaubach/drivenet-carla-av/actions/workflows/ci.yml/badge.svg)](https://github.com/joshlaubach/drivenet-carla-av/actions/workflows/ci.yml)
 
-An end-to-end autonomous driving system built on CARLA 0.9.16. The project
-progresses through five stages: collecting expert driving data across diverse
-conditions, training a condition-aware convolutional policy via behavior cloning,
-refining that policy with Proximal Policy Optimization through live simulator
-interaction, benchmarking across scenarios, and estimating causal effects of
-driving conditions on performance via propensity score matching.
+DriveNet is a simulation-based AV policy validation framework built on
+CARLA 0.9.16. It covers the full evaluation lifecycle: directed scenario
+data collection across 324 ODD conditions, policy training via behavior
+cloning and PPO fine-tuning, multi-scenario safety benchmarking, and
+causal analysis of condition effects on driving performance. Designed with
+reproducible, config-driven workflows suitable for regression testing
+across model versions.
 
 The driving agent receives a front-facing RGB camera image and vehicle state
 (speed, heading) as input and outputs continuous controls (steering, throttle,
