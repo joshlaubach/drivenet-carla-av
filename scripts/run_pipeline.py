@@ -64,8 +64,11 @@ def _count_town_frames(town_dir: Path) -> int:
     chunks = sorted(town_dir.glob("chunk_*.npz"))
     total = 0
     for path in chunks:
-        with np.load(path, allow_pickle=True) as data:
-            total += int(data["images"].shape[0])
+        try:
+            with np.load(path, allow_pickle=True) as data:
+                total += int(data["images"].shape[0])
+        except Exception as exc:
+            log.warning("Skipping corrupt chunk %s: %s", path.name, exc)
     return total
 
 
