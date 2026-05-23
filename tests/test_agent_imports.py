@@ -26,7 +26,7 @@ def test_causal_agent_instantiates() -> None:
     from src.agents.causal_agent import CausalAnalysisAgent
     agent = CausalAnalysisAgent()
     assert agent.cfg is not None
-    assert len(agent.treatments) == 5  # rain, night, urban, ppo, driving_style
+    assert len(agent.treatments) == 6  # 3 sensor comparisons + rain, night, style
 
 
 def test_bc_agent_instantiates() -> None:
