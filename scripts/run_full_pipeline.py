@@ -64,7 +64,8 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
-        logging.StreamHandler(sys.stdout),
+        # File-only: no stdout StreamHandler so a broken pipe can never kill
+        # the process when running detached from a terminal.
         logging.FileHandler(LOG_PATH, mode="a", encoding="utf-8"),
     ],
 )
