@@ -97,10 +97,10 @@ class BehaviorCloningAgent:
         model_name = f"BC_model_{self.sensor_suite}"
 
         log.info("Loading data from %s ...", self.data_dir)
-        raw = self._load_all_chunks()
+        raw = self._load_all_chunks()  # images already cropped/resized inside
 
-        log.info("Loaded %d frames. Preprocessing images ...", raw["images"].shape[0])
-        images = crop_and_resize(raw["images"])
+        log.info("Loaded %d frames.", raw["images"].shape[0])
+        images = raw["images"]  # already preprocessed to (N, RESIZE_H, RESIZE_W, 3)
         meta = encode_metadata(
             raw,
             cfg["weather_codes"],
@@ -203,20 +203,31 @@ class BehaviorCloningAgent:
     # -- Data loading ---------------------------------------------------------
 
     def _load_all_chunks(self) -> dict[str, np.ndarray]:
-        """Load and concatenate all chunk .npz files from the data directory."""
+        """Load, preprocess, and concatenate all chunk NPZ files.
+
+        Images are cropped and resized immediately after loading each chunk so
+        only the small preprocessed arrays (200x100x3 uint8, ~144 MB/chunk) are
+        accumulated in RAM, not the raw 800x600x3 originals (~3.5 GB/chunk).
+        """
         chunk_files = sorted(self.data_dir.rglob("chunk_*.npz"))
         if not chunk_files:
             raise RuntimeError(
                 f"No chunk files found in {self.data_dir}. "
                 "Run DataCollectionAgent first."
             )
-        parts: dict[str, list[np.ndarray]] = {}
+        image_parts: list[np.ndarray] = []
+        other_parts: dict[str, list[np.ndarray]] = {}
         for path in chunk_files:
-            chunk = np.load(path, allow_pickle=True)
-            for key in chunk.files:
-                parts.setdefault(key, []).append(chunk[key])
-            log.debug("Loaded %s (%d frames).", path.name, len(chunk["images"]))
-        return {k: np.concatenate(v, axis=0) for k, v in parts.items()}
+            with np.load(path, allow_pickle=True) as chunk:
+                # Preprocess images immediately — releases raw 800x600 array on exit
+                image_parts.append(crop_and_resize(chunk["images"]))
+                for key in chunk.files:
+                    if key != "images":
+                        other_parts.setdefault(key, []).append(chunk[key])
+            log.debug("Preprocessed %s (%d frames).", path.name, len(image_parts[-1]))
+        result = {"images": np.concatenate(image_parts, axis=0)}
+        result.update({k: np.concatenate(v, axis=0) for k, v in other_parts.items()})
+        return result
 
     # -- Utilities ------------------------------------------------------------
 
