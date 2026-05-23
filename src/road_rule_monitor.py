@@ -96,6 +96,23 @@ class RoadRuleMonitor(gymnasium.Wrapper):
         super().__init__(env)
         # Per-episode counters and state machines reset in reset().
         self._wrong_way_counter = 0
+
+    # -- Attribute forwarding -------------------------------------------------
+    # gymnasium.Wrapper in v1.x does not define __getattr__, so we must
+    # explicitly expose the CarlaEnv attributes that agents and utilities
+    # (e.g. make_weather, GlobalRoutePlanner) access directly on the env object.
+
+    @property
+    def vehicle(self):
+        return self.env.vehicle
+
+    @property
+    def world(self):
+        return self.env.world
+
+    @property
+    def map(self):
+        return self.env.map
         self._red_light_counter = 0
         self._off_road_counter = 0
         self._prev_speed_kmh = 0.0

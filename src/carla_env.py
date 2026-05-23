@@ -138,7 +138,7 @@ class CarlaEnv(gymnasium.Env):
         )
 
         self.client = carla.Client(host, port)
-        self.client.set_timeout(10.0)
+        self.client.set_timeout(60.0)
         try:
             self.client.get_server_version()
         except RuntimeError as exc:
