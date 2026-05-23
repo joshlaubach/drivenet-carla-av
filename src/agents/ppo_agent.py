@@ -53,6 +53,7 @@ import torch.optim as optim
 
 from src.carla_env import CarlaEnv
 from src.carla_utils import make_weather
+from src.road_rule_monitor import RoadRuleMonitor
 from src.config import load_config, require_keys
 from src.ppo import (
     ActorCritic,
@@ -188,14 +189,14 @@ class PPOAgent:
                 proc = self._launch_carla()
                 try:
                     self._wait_for_carla()
-                    env = CarlaEnv(
+                    env = RoadRuleMonitor(CarlaEnv(
                         host=self.host,
                         port=self.port,
                         town=town,
                         image_width=cfg["cam_w"],
                         image_height=cfg["cam_h"],
                         sensor_suite=self.sensor_suite,
-                    )
+                    ))
                     try:
                         mean_ep_len = (
                             float(np.mean(recent_ep_lengths[-20:]))
@@ -307,6 +308,7 @@ class PPOAgent:
         prev_speed_kmh = 0.0
         prev_prev_speed_kmh = -1.0
         prev_lane_id = -1
+        prev_steer = 0.0
 
         for _ in range(cfg["n_steps"]):
             img_t, state_t = self._preprocess_obs(obs)
@@ -330,6 +332,7 @@ class PPOAgent:
                 lane_id = prev_lane_id
 
             speed_kmh = info["speed_kmh"]
+            current_steer = float(action_np[0])
             reward = compute_style_reward(
                 base_reward=reward,
                 speed_kmh=speed_kmh,
@@ -339,11 +342,14 @@ class PPOAgent:
                 prev_lane_id=prev_lane_id,
                 style_weights=self.style_weights,
                 dt=1.0 / 20.0,
+                steer=current_steer,
+                prev_steer=prev_steer,
             )
 
             prev_prev_speed_kmh = prev_speed_kmh
             prev_speed_kmh = speed_kmh
             prev_lane_id = lane_id
+            prev_steer = current_steer
 
             self._buffer.add(
                 img_t.cpu(), state_t.cpu(),
@@ -366,6 +372,7 @@ class PPOAgent:
                 prev_speed_kmh = 0.0
                 prev_prev_speed_kmh = -1.0
                 prev_lane_id = -1
+                prev_steer = 0.0
                 obs, _ = env.reset()
             else:
                 obs = next_obs

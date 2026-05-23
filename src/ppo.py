@@ -26,6 +26,10 @@ SPEED_BONUS_REF_KMH: float = 40.0
 # roughly 1.0 at this normalization factor.
 JERK_NORM_FACTOR: float = 1000.0
 
+# Steering-rate scale: a 0.5-unit steer change in one 0.05 s step (= 10 /s)
+# produces a penalty of 1.0 at this normalization factor.
+STEER_NORM_FACTOR: float = 10.0
+
 
 # ---------------------------------------------------------------------------
 # Driving-style reward shaping
@@ -40,22 +44,27 @@ def compute_style_reward(
     prev_lane_id: int,
     style_weights: dict[str, float],
     dt: float = 0.05,
+    steer: float = 0.0,
+    prev_steer: float = 0.0,
 ) -> float:
-    """Apply style-dependent jerk, speed, and lane-change terms to base_reward.
+    """Apply style-dependent jerk, speed, lane-change, and steering terms.
 
     Parameters
     ----------
     base_reward : float
-        Reward returned by CarlaEnv.step() (a flat +1.0 per step).
+        Reward returned by the environment step (includes RoadRuleMonitor penalties).
     speed_kmh, prev_speed_kmh, prev_prev_speed_kmh : float
         Three consecutive ego speed readings used to compute jerk.
     lane_id, prev_lane_id : int
         Current and previous CARLA waypoint lane IDs.
         Pass -1 as a sentinel for the first step of an episode.
     style_weights : dict
-        Keys: jerk_penalty, speed_bonus, lane_change_penalty.
+        Keys: jerk_penalty, speed_bonus, lane_change_penalty, steering_penalty.
     dt : float
         Simulation timestep in seconds (default 0.05 = 20 FPS).
+    steer, prev_steer : float
+        Current and previous steer actions in [-1, 1], used to compute
+        abrupt steering rate (Tier 3 comfort penalty).
 
     Returns
     -------
@@ -71,6 +80,9 @@ def compute_style_reward(
         accel_prev = (prev_speed_kmh - prev_prev_speed_kmh) / dt
         jerk = abs(accel_now - accel_prev) / dt
         reward -= (jerk / JERK_NORM_FACTOR) * style_weights["jerk_penalty"]
+
+        steer_rate = abs(steer - prev_steer) / dt
+        reward -= (steer_rate / STEER_NORM_FACTOR) * style_weights.get("steering_penalty", 1.0)
 
     if prev_lane_id != -1 and lane_id != prev_lane_id:
         reward -= style_weights["lane_change_penalty"]
@@ -112,13 +124,19 @@ class ActorCritic(nn.Module):
         super().__init__()
 
         _bc = DriveNet(dropout=dropout, state_dim=state_dim, action_dim=action_dim)
-        result = _bc.load_state_dict(bc_state_dict, strict=False)
-        if result.unexpected_keys:
-            log.info(
-                "Loaded BC backbone; skipped %d BC-only keys "
-                "(metadata embeddings and head weights with different input size).",
-                len(result.unexpected_keys),
-            )
+        # Pre-filter to backbone keys only: strict=False skips missing/unexpected
+        # keys but still errors on shape mismatches (BC head includes meta dims,
+        # PPO head does not), so we must not pass head weights at all.
+        backbone_state = {
+            k[len("features."):]: v
+            for k, v in bc_state_dict.items()
+            if k.startswith("features.")
+        }
+        _bc.features.load_state_dict(backbone_state, strict=False)
+        log.info(
+            "ActorCritic: loaded %d backbone keys from BC checkpoint.",
+            len(backbone_state),
+        )
 
         self.features = _bc.features
 

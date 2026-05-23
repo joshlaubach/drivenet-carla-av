@@ -187,8 +187,15 @@ class CarlaEnv(gymnasium.Env):
         self._collision_flag = False
         self._collision_intensity = 0.0
         self._lane_invaded = False
+        self._crossed_lane_markings: list = []
         self._last_image: np.ndarray | None = None
         self._speed_kmh = 0.0
+
+    # -- Public properties -----------------------------------------------------
+
+    @property
+    def map(self) -> carla.Map:
+        return self.world.get_map()
 
     # -- Actor setup -----------------------------------------------------------
 
@@ -325,6 +332,9 @@ class CarlaEnv(gymnasium.Env):
             self = weak_self()
             if self is not None:
                 self._lane_invaded = True
+                self._crossed_lane_markings.extend(
+                    m.type for m in event.crossed_lane_markings
+                )
         except Exception:
             pass
 
@@ -504,6 +514,7 @@ class CarlaEnv(gymnasium.Env):
         self._collision_flag = False
         self._collision_intensity = 0.0
         self._lane_invaded = False
+        self._crossed_lane_markings.clear()
 
         self._setup_vehicle()
         self._setup_sensors()
@@ -555,14 +566,17 @@ class CarlaEnv(gymnasium.Env):
             self._collision_intensity = 0.0
 
         lane_invaded = self._lane_invaded
+        marking_types = list(self._crossed_lane_markings)
         if self._lane_invaded:
-            reward -= 10.0
+            reward -= 3.0
             self._lane_invaded = False
+            self._crossed_lane_markings.clear()
 
         info = {
             "speed_kmh": speed_kmh,
             "collision": terminated,
             "lane_invaded": lane_invaded,
+            "crossed_lane_marking_types": marking_types,
         }
         return obs, reward, terminated, False, info
 

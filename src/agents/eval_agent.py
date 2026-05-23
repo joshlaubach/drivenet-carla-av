@@ -45,6 +45,7 @@ from scipy import stats
 
 from src.carla_env import CarlaEnv
 from src.carla_utils import make_weather
+from src.road_rule_monitor import RoadRuleMonitor
 from src.config import load_config, require_keys
 from src.drivenet import DriveNet
 from src.drivenet_lidar import LidarDriveNet
@@ -141,14 +142,14 @@ class EvaluationAgent:
             proc = self._launch_carla()
             try:
                 self._wait_for_carla()
-                env = CarlaEnv(
+                env = RoadRuleMonitor(CarlaEnv(
                     host=self.host,
                     port=self.port,
                     town=town,
                     image_width=400,
                     image_height=300,
                     sensor_suite=self.sensor_suite,
-                )
+                ))
                 spectator_sensor = self._setup_spectator_camera(env)
                 try:
                     from agents.navigation.global_route_planner import (
@@ -315,6 +316,15 @@ class EvaluationAgent:
         total_steps = 0
         survived = True
         prev_loc = ego_loc
+        viol_red_light = 0
+        viol_wrong_way = 0
+        viol_off_road = 0
+        viol_double_solid = 0
+        viol_speeding_steps = 0
+        viol_tailgating_steps = 0
+        viol_stop_sign = 0
+        viol_solid_lane_steps = 0
+        viol_yield = 0
 
         for _ in range(cfg["max_steps_per_episode"]):
             action = self._get_action(model, spec, obs)
@@ -330,6 +340,25 @@ class EvaluationAgent:
                 collision_count += 1
             if info.get("lane_invaded", False):
                 lane_invasion_steps += 1
+            rm = info.get("road_rule_monitor", {})
+            if rm.get("red_light"):
+                viol_red_light += 1
+            if rm.get("wrong_way"):
+                viol_wrong_way += 1
+            if rm.get("off_road"):
+                viol_off_road += 1
+            if rm.get("double_solid_crossing"):
+                viol_double_solid += 1
+            if rm.get("speeding"):
+                viol_speeding_steps += 1
+            if rm.get("tailgating"):
+                viol_tailgating_steps += 1
+            if rm.get("stop_sign_violation"):
+                viol_stop_sign += 1
+            if rm.get("solid_lane_crossing"):
+                viol_solid_lane_steps += 1
+            if rm.get("failure_to_yield"):
+                viol_yield += 1
 
             vel = env.vehicle.get_velocity()
             speed_sum += 3.6 * math.sqrt(vel.x ** 2 + vel.y ** 2 + vel.z ** 2)
@@ -374,6 +403,7 @@ class EvaluationAgent:
         lane_keeping_frac = 1.0 - lane_invasion_steps / max(total_steps, 1)
         collision_rate = collision_count / max(total_distance / 100.0, 1e-6)
 
+        tier1_count = viol_red_light + viol_wrong_way + viol_off_road + viol_double_solid
         record = {
             "model": spec["name"],
             "model_type": spec["type"],
@@ -390,6 +420,17 @@ class EvaluationAgent:
             "distance_m": round(float(total_distance), 2),
             "survived": bool(survived),
             "total_steps": int(total_steps),
+            # Road rule violation counts
+            "viol_red_light": int(viol_red_light),
+            "viol_wrong_way": int(viol_wrong_way),
+            "viol_off_road": int(viol_off_road),
+            "viol_double_solid": int(viol_double_solid),
+            "viol_tier1_total": int(tier1_count),
+            "viol_speeding_steps": int(viol_speeding_steps),
+            "viol_tailgating_steps": int(viol_tailgating_steps),
+            "viol_stop_sign": int(viol_stop_sign),
+            "viol_solid_lane_steps": int(viol_solid_lane_steps),
+            "viol_yield": int(viol_yield),
         }
         return record, frames
 
