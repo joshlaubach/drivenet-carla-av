@@ -2,8 +2,6 @@
 
 [![CI](https://github.com/joshlaubach/drivenet-carla-av/actions/workflows/ci.yml/badge.svg)](https://github.com/joshlaubach/drivenet-carla-av/actions/workflows/ci.yml)
 
-![Project overview](docs/images/github_readme.png)
-
 ---
 
 ## Table of Contents
@@ -31,14 +29,6 @@ The car learns in two phases. First it **watches** thousands of expert driving e
 ---
 
 ## In Action
-
-**Perception and decision pipeline:**
-
-![Perception pipeline diagram](docs/images/readme_perception_diagram.png)
-
-**Three-tier California driving rule system:**
-
-![Reward tier diagram](docs/images/readme_reward_tiers.png)
 
 > *CARLA simulation footage will be added here after the training run completes.*
 
