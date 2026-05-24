@@ -5,7 +5,6 @@
 # rollout batch per town per update. Held-out eval towns are in eval.yaml.
 training_towns:
   - Town02
-  - Town06
   - Town10HD
 
 # Driving style integer codes (must match bc.yaml style_codes).
