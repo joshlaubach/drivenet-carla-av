@@ -345,7 +345,7 @@ class CarlaEnv(gymnasium.Env):
         target_frame = self.world.get_snapshot().frame
         while True:
             try:
-                data = queue.get(timeout=2.0)
+                data = queue.get(timeout=0.5)
             except Empty:
                 raise RuntimeError(
                     f"Camera sensor timed out waiting for frame {target_frame}."
@@ -363,7 +363,7 @@ class CarlaEnv(gymnasium.Env):
         target_frame = self.world.get_snapshot().frame
         while True:
             try:
-                data = self._lidar_queue.get(timeout=2.0)
+                data = self._lidar_queue.get(timeout=0.5)
             except Empty:
                 raise RuntimeError(
                     f"Lidar sensor timed out waiting for frame {target_frame}."

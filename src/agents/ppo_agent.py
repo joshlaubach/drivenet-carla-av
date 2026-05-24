@@ -217,7 +217,7 @@ class PPOAgent:
                         env.close()
                 finally:
                     self._kill_carla(proc)
-                    time.sleep(6.0)
+                    time.sleep(10.0)
 
                 # Update model on the rollout just collected
                 p_loss, v_loss, ent, kl = self._update_model(
@@ -540,7 +540,7 @@ class PPOAgent:
 
     def _wait_for_carla(
         self,
-        max_wait: float = 40.0,
+        max_wait: float = 60.0,
         poll_interval: float = 3.0,
     ) -> None:
         """Block until CARLA accepts TCP connections on self.port."""
@@ -549,7 +549,7 @@ class PPOAgent:
             try:
                 with socket.create_connection((self.host, self.port), timeout=2.0):
                     log.info("CARLA is reachable.")
-                    time.sleep(5.0)
+                    time.sleep(15.0)
                     return
             except (ConnectionRefusedError, OSError):
                 time.sleep(poll_interval)
