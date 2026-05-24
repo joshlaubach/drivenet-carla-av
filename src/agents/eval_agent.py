@@ -107,7 +107,8 @@ class EvaluationAgent:
         np.random.seed(self.seed)
         random.seed(self.seed)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Force CPU: simultaneous CUDA + DX12 CARLA rendering crashes RTX 5080.
+        self.device = torch.device("cpu")
         self.results_path = self.results_dir / "eval_results.json"
 
     # -- Public entry point ---------------------------------------------------

@@ -130,7 +130,10 @@ class PPOAgent:
         np.random.seed(self.seed)
         random.seed(self.seed)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Force CPU: simultaneous CUDA + DX12 CARLA rendering crashes the
+        # RTX 5080 Blackwell GPU mid-rollout. CPU inference is 2.9 ms per
+        # step -- not the bottleneck (CARLA simulation tick is).
+        self.device = torch.device("cpu")
         log.info(
             "PPOAgent using device: %s  style: %s  sensor_suite: %s",
             self.device, self.style, self.sensor_suite,
