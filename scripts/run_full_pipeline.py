@@ -14,6 +14,13 @@ Usage:
 
 from __future__ import annotations
 
+import os
+# Hide GPU from PyTorch before any torch import. CARLA uses DirectX12 (not
+# CUDA) so this does not affect simulation rendering, but it prevents
+# simultaneous GPU access from PyTorch and the DX12 driver which crashes
+# CarlaUE4-Win64-Shipping on RTX 5080 Blackwell hardware mid-rollout.
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+
 import argparse
 import json
 import logging
