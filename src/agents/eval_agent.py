@@ -194,7 +194,7 @@ class EvaluationAgent:
                     env.close()
             finally:
                 self._kill_carla(proc)
-                time.sleep(6.0)
+                time.sleep(20.0)
 
         self._append_results(all_records)
         self._run_significance_tests()
@@ -695,15 +695,19 @@ class EvaluationAgent:
             except (subprocess.TimeoutExpired, OSError):
                 proc.kill()
             log.info("Terminated CARLA PID %d.", proc.pid)
-        for exe in ["CarlaUE4-Win64-Shipping.exe", "CarlaUE4.exe"]:
-            try:
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", exe],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except FileNotFoundError:
-                pass
+        try:
+            subprocess.run(
+                [
+                    "powershell", "-NonInteractive", "-Command",
+                    "Get-Process -Name 'CarlaUE4*' -ErrorAction SilentlyContinue"
+                    " | Stop-Process -Force -ErrorAction SilentlyContinue",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+        except Exception:
+            pass
 
     # -- Helpers ---------------------------------------------------------------
 

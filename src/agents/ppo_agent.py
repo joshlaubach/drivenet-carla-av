@@ -220,7 +220,7 @@ class PPOAgent:
                         env.close()
                 finally:
                     self._kill_carla(proc)
-                    time.sleep(10.0)
+                    time.sleep(20.0)
 
                 # Update model on the rollout just collected
                 p_loss, v_loss, ent, kl = self._update_model(
@@ -562,7 +562,13 @@ class PPOAgent:
         )
 
     def _kill_carla(self, proc: subprocess.Popen | None = None) -> None:
-        """Terminate the CARLA process and any stray instances."""
+        """Terminate the CARLA process and any stray instances.
+
+        Uses PowerShell Stop-Process which reliably kills CarlaUE4-Win64-
+        Shipping.exe on Windows. taskkill /F /IM silently fails on this
+        process (possibly due to DX12 handle protection), leaving a zombie
+        that DX12-conflicts with the next CARLA launch.
+        """
         if proc is not None:
             try:
                 proc.terminate()
@@ -570,15 +576,20 @@ class PPOAgent:
             except (subprocess.TimeoutExpired, OSError):
                 proc.kill()
             log.info("Terminated CARLA PID %d.", proc.pid)
-        for exe in ["CarlaUE4-Win64-Shipping.exe", "CarlaUE4.exe"]:
-            try:
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", exe],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except FileNotFoundError:
-                pass
+        # PowerShell Stop-Process is more reliable than taskkill /IM on RTX 5080.
+        try:
+            subprocess.run(
+                [
+                    "powershell", "-NonInteractive", "-Command",
+                    "Get-Process -Name 'CarlaUE4*' -ErrorAction SilentlyContinue"
+                    " | Stop-Process -Force -ErrorAction SilentlyContinue",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+        except Exception:
+            pass
 
     # -- Resume checkpoint -----------------------------------------------------
 
