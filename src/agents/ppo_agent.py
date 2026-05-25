@@ -183,12 +183,9 @@ class PPOAgent:
                 if total_steps >= cfg["total_timesteps"]:
                     break
 
-                log.info(
-                    "[%s] Collecting rollout in %s (step %d/%d).",
-                    self.style, town, total_steps, cfg["total_timesteps"],
-                )
-
-                # Launch a fresh CARLA process for this town
+                # Launch ONE CARLA per town and keep it running for ALL rollouts
+                # in that town. Killing and relaunching between every 512-step
+                # rollout causes DX12 memory conflicts on RTX 5080 Blackwell.
                 proc = self._launch_carla()
                 try:
                     self._wait_for_carla()
@@ -208,58 +205,73 @@ class PPOAgent:
                         weather = self._sample_weather(total_steps, mean_ep_len)
                         make_weather(env, weather)
 
-                        steps_added, ep_rewards, ep_lengths = self._collect_rollout(
-                            model, env, town,
-                        )
-                        total_steps += steps_added
-                        recent_ep_rewards.extend(ep_rewards)
-                        recent_ep_lengths.extend(ep_lengths)
-                        history["episode_rewards"].extend(ep_rewards)
-                        history["episode_lengths"].extend(ep_lengths)
+                        # Collect all rollouts for this town in one CARLA session.
+                        while total_steps < cfg["total_timesteps"]:
+                            log.info(
+                                "[%s] Collecting rollout in %s (step %d/%d).",
+                                self.style, town, total_steps, cfg["total_timesteps"],
+                            )
+                            try:
+                                steps_added, ep_rewards, ep_lengths = self._collect_rollout(
+                                    model, env, town,
+                                )
+                            except RuntimeError as exc:
+                                # CARLA crashed mid-rollout — break inner loop to
+                                # relaunch CARLA and resume from current total_steps.
+                                log.error(
+                                    "[%s] Rollout failed (%s). Relaunching CARLA.", self.style, exc
+                                )
+                                break
+
+                            total_steps += steps_added
+                            recent_ep_rewards.extend(ep_rewards)
+                            recent_ep_lengths.extend(ep_lengths)
+                            history["episode_rewards"].extend(ep_rewards)
+                            history["episode_lengths"].extend(ep_lengths)
+
+                            # Update model immediately after each rollout.
+                            p_loss, v_loss, ent, kl = self._update_model(
+                                model, optimizer, scaler,
+                            )
+                            if not (math.isnan(p_loss) or math.isnan(v_loss)):
+                                history["policy_losses"].append(p_loss)
+                                history["value_losses"].append(v_loss)
+                                history["entropy_bonuses"].append(ent)
+                                history["kl_divs"].append(kl)
+
+                            if len(recent_ep_rewards) >= 5:
+                                mean_reward = float(np.mean(recent_ep_rewards[-10:]))
+                                if mean_reward > best_mean_reward:
+                                    best_mean_reward = mean_reward
+                                    torch.save(model.state_dict(), checkpoint_path)
+                                    log.info(
+                                        "[%s] Step %d -- new best mean_reward=%.2f -> %s",
+                                        self.style, total_steps,
+                                        mean_reward, checkpoint_path.name,
+                                    )
+
+                            if total_steps % 10_000 < cfg["n_steps"]:
+                                mean_r = (
+                                    float(np.mean(recent_ep_rewards[-10:]))
+                                    if recent_ep_rewards else 0.0
+                                )
+                                log.info(
+                                    "[%s] Step %6d/%d  policy=%.4f  value=%.4f  "
+                                    "entropy=%.4f  kl=%.4f  mean_ep_r=%.2f",
+                                    self.style, total_steps, cfg["total_timesteps"],
+                                    p_loss, v_loss, ent, kl, mean_r,
+                                )
+                                self._save_resume(
+                                    model, optimizer, scaler,
+                                    total_steps, best_mean_reward,
+                                    history, recent_ep_rewards, recent_ep_lengths,
+                                )
+
                     finally:
                         env.close()
                 finally:
                     self._kill_carla(proc)
                     time.sleep(20.0)
-
-                # Update model on the rollout just collected
-                p_loss, v_loss, ent, kl = self._update_model(
-                    model, optimizer, scaler,
-                )
-                if not (math.isnan(p_loss) or math.isnan(v_loss)):
-                    history["policy_losses"].append(p_loss)
-                    history["value_losses"].append(v_loss)
-                    history["entropy_bonuses"].append(ent)
-                    history["kl_divs"].append(kl)
-
-                # Checkpoint on improved mean reward
-                if len(recent_ep_rewards) >= 5:
-                    mean_reward = float(np.mean(recent_ep_rewards[-10:]))
-                    if mean_reward > best_mean_reward:
-                        best_mean_reward = mean_reward
-                        torch.save(model.state_dict(), checkpoint_path)
-                        log.info(
-                            "[%s] Step %d -- new best mean_reward=%.2f -> %s",
-                            self.style, total_steps,
-                            mean_reward, checkpoint_path.name,
-                        )
-
-                if total_steps % 10_000 < cfg["n_steps"]:
-                    mean_r = (
-                        float(np.mean(recent_ep_rewards[-10:]))
-                        if recent_ep_rewards else 0.0
-                    )
-                    log.info(
-                        "[%s] Step %6d/%d  policy=%.4f  value=%.4f  "
-                        "entropy=%.4f  kl=%.4f  mean_ep_r=%.2f",
-                        self.style, total_steps, cfg["total_timesteps"],
-                        p_loss, v_loss, ent, kl, mean_r,
-                    )
-                    self._save_resume(
-                        model, optimizer, scaler,
-                        total_steps, best_mean_reward,
-                        history, recent_ep_rewards, recent_ep_lengths,
-                    )
 
         self._save_results(history)
         # Delete resume checkpoint — clean completion means no resume needed.
