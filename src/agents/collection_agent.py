@@ -15,9 +15,14 @@ lane-change decisions).
 
 Hardware constraint: no runtime map switching on RTX 5080 Blackwell.
 
+The sensor suite ("single_cam", "multi_cam", or "lidar") selects which
+CarlaEnv observation is persisted and namespaces the output under
+``data/{suite}/{town}/``.
+
 Usage:
     from src.agents.collection_agent import DataCollectionAgent
-    agent = DataCollectionAgent(town="Town03")
+    agent = DataCollectionAgent(town="Town03")                      # single_cam
+    agent = DataCollectionAgent(town="Town03", sensor_suite="lidar")
     agent.run()                  # single town (CARLA pre-launched)
     agent.run_all_towns()        # all 6 towns autonomously
 """
@@ -70,6 +75,7 @@ class DataCollectionAgent:
         self,
         town: str = "Town01",
         data_dir: str = "data",
+        sensor_suite: str = "single_cam",
         frames_per_condition: int | None = None,
         chunk_size: int | None = None,
         host: str = "localhost",
@@ -88,9 +94,19 @@ class DataCollectionAgent:
             "collection",
         )
 
+        if sensor_suite not in CarlaEnv.VALID_SUITES:
+            raise ValueError(
+                f"sensor_suite must be one of {CarlaEnv.VALID_SUITES}, "
+                f"got '{sensor_suite}'."
+            )
+
         self.town = town
+        self.sensor_suite = sensor_suite
         self.data_dir_root = Path(data_dir)
-        self.data_dir = self.data_dir_root / town
+        # Namespace data by sensor suite so each suite gets its own tree:
+        #   data/{suite}/{town}/chunk_*.npz
+        # Legacy single_cam data at data/{town}/ is left untouched.
+        self.data_dir = self.data_dir_root / self.sensor_suite / town
         self.frames_per_condition = (
             frames_per_condition if frames_per_condition is not None
             else self.cfg["frames_per_condition"]
@@ -113,7 +129,7 @@ class DataCollectionAgent:
 
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._chunk_index = 0
-        self._buffer = _FrameBuffer()
+        self._buffer = _FrameBuffer(self.sensor_suite)
         self._collision_log: list[dict[str, Any]] = []
 
         # Follow car actor reference (managed per-episode)
@@ -136,6 +152,7 @@ class DataCollectionAgent:
             town=self.town,
             image_width=self.cfg["image_width"],
             image_height=self.cfg["image_height"],
+            sensor_suite=self.sensor_suite,
         )
         try:
             self._collect_all_conditions(env)
@@ -193,12 +210,12 @@ class DataCollectionAgent:
             log.info("Starting collection for %s", town)
             log.info("=" * 60)
 
-            # Reconfigure for this town
+            # Reconfigure for this town (keep the suite namespace)
             self.town = town
-            self.data_dir = self.data_dir_root / town
+            self.data_dir = self.data_dir_root / self.sensor_suite / town
             self.data_dir.mkdir(parents=True, exist_ok=True)
             self._chunk_index = 0
-            self._buffer = _FrameBuffer()
+            self._buffer = _FrameBuffer(self.sensor_suite)
             self._collision_log = []
 
             # Launch CARLA, collect, shut down
@@ -611,11 +628,23 @@ class DataCollectionAgent:
         speed_limit = env.vehicle.get_speed_limit()
         road_type, lane_count, is_junction = self._get_road_features(env)
 
+        # Pull the suite-specific sensor payload under a generic "image" key.
+        # _FrameBuffer.as_arrays() maps it to the correct npz key/dtype:
+        #   single_cam -> obs["camera"]  (H, W, 3) uint8     -> "images"
+        #   multi_cam  -> obs["cameras"] (3, H, W, 3) uint8  -> "images_multi"
+        #   lidar      -> obs["bev"]     (H, W, 3) float32   -> "bev"
+        if self.sensor_suite == "single_cam":
+            sensor_payload = obs["camera"]
+        elif self.sensor_suite == "multi_cam":
+            sensor_payload = obs["cameras"]
+        else:  # lidar
+            sensor_payload = obs["bev"]
+
         # Raw state stores un-normalized values so that DrivingDataset can
         # apply its own normalization. Layout:
         #   [speed_kmh, heading_deg, speed_limit_kmh, lane_count, is_junction]
         return {
-            "image": obs["camera"],
+            "image": sensor_payload,
             "state": np.array(
                 [speed_kmh, heading_deg, float(speed_limit),
                  float(lane_count), float(is_junction)],
@@ -750,9 +779,35 @@ class DataCollectionAgent:
 
 
 class _FrameBuffer:
-    """In-memory accumulator for a single chunk's worth of frames."""
+    """In-memory accumulator for a single chunk's worth of frames.
 
-    def __init__(self) -> None:
+    The sensor payload (stored under the generic ``"image"`` key in each
+    frame dict) is written to a suite-specific npz key with a suite-specific
+    dtype, so downstream loaders can tell the suites apart:
+
+    ===========  =================  ===================  =========
+    suite        npz key            per-chunk shape      dtype
+    ===========  =================  ===================  =========
+    single_cam   ``images``         (N, H, W, 3)         uint8
+    multi_cam    ``images_multi``   (N, 3, H, W, 3)      uint8
+    lidar        ``bev``            (N, H, W, 3)          float32
+    ===========  =================  ===================  =========
+    """
+
+    # Maps each suite to (npz_key, dtype) for the sensor payload.
+    _PAYLOAD_SPEC = {
+        "single_cam": ("images", np.uint8),
+        "multi_cam": ("images_multi", np.uint8),
+        "lidar": ("bev", np.float32),
+    }
+
+    def __init__(self, sensor_suite: str = "single_cam") -> None:
+        if sensor_suite not in self._PAYLOAD_SPEC:
+            raise ValueError(
+                f"sensor_suite must be one of {tuple(self._PAYLOAD_SPEC)}, "
+                f"got '{sensor_suite}'."
+            )
+        self.sensor_suite = sensor_suite
         self._frames: list[dict[str, Any]] = []
 
     def append(self, frame: dict[str, Any]) -> None:
@@ -765,8 +820,11 @@ class _FrameBuffer:
         self._frames.clear()
 
     def as_arrays(self) -> dict[str, np.ndarray]:
+        payload_key, payload_dtype = self._PAYLOAD_SPEC[self.sensor_suite]
         return {
-            "images": np.array([f["image"] for f in self._frames], dtype=np.uint8),
+            payload_key: np.array(
+                [f["image"] for f in self._frames], dtype=payload_dtype
+            ),
             "states": np.array([f["state"] for f in self._frames], dtype=np.float32),
             "actions": np.array([f["action"] for f in self._frames], dtype=np.float32),
             "locations": np.array([f["location"] for f in self._frames], dtype=np.float32),
