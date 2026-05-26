@@ -9,6 +9,7 @@ on exit.
 
 Usage:
     python scripts/collect_one_town.py --town Town01 [--data-dir data]
+                                       [--sensor-suite single_cam]
                                        [--frames-per-condition N]
                                        [--no-follow-car]
 
@@ -29,12 +30,16 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 _ALL_TOWNS = ["Town01", "Town02", "Town03", "Town04", "Town05", "Town10HD"]
+_ALL_SUITES = ["single_cam", "multi_cam", "lidar"]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--town", required=True, choices=_ALL_TOWNS)
     parser.add_argument("--data-dir", default="data")
+    parser.add_argument("--sensor-suite", default="single_cam",
+                        choices=_ALL_SUITES,
+                        help="Sensor suite to collect (default: single_cam).")
     parser.add_argument("--frames-per-condition", type=int, default=None,
                         help="Override frames_per_condition for smoke runs.")
     parser.add_argument("--no-follow-car", action="store_true",
@@ -56,6 +61,7 @@ def main() -> int:
     agent = DataCollectionAgent(
         town=args.town,
         data_dir=args.data_dir,
+        sensor_suite=args.sensor_suite,
         frames_per_condition=args.frames_per_condition,
         enable_follow_car=not args.no_follow_car,
         enable_viz=args.viz,
@@ -72,7 +78,9 @@ def main() -> int:
         return 2
 
     chunks = results.get(args.town, 0)
-    logging.info("Done -- %s saved %d chunks.", args.town, chunks)
+    logging.info(
+        "Done -- %s [%s] saved %d chunks.", args.town, args.sensor_suite, chunks
+    )
     sys.stdout.flush()
 
     # Bypass interpreter shutdown so libcarla's lingering Boost.Asio threads
