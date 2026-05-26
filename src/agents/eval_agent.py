@@ -43,15 +43,16 @@ import numpy as np
 import torch
 from scipy import stats
 
+from src.baseline import PIDBaselinePolicy
 from src.carla_env import CarlaEnv
 from src.carla_utils import make_weather
-from src.road_rule_monitor import RoadRuleMonitor
 from src.config import load_config, require_keys
 from src.drivenet import DriveNet
 from src.drivenet_lidar import LidarDriveNet
 from src.drivenet_multicam import MultiCamDriveNet
 from src.ppo import ActorCritic, MultiCamActorCritic
 from src.preprocessing import RESIZE_H, RESIZE_W
+from src.road_rule_monitor import RoadRuleMonitor
 
 log = logging.getLogger(__name__)
 
@@ -309,6 +310,10 @@ class EvaluationAgent:
             for i in range(len(route_locs) - 1)
         )
 
+        # Baseline: set route and reset controller state for this episode
+        if spec["type"] == "baseline":
+            model.set_route(route_locs)
+
         route_idx = 0
         total_distance = 0.0
         collision_count = 0
@@ -328,6 +333,9 @@ class EvaluationAgent:
         viol_yield = 0
 
         for _ in range(cfg["max_steps_per_episode"]):
+            if spec["type"] == "baseline":
+                loc = env.vehicle.get_location()
+                obs["_vehicle_loc"] = (loc.x, loc.y)
             action = self._get_action(model, spec, obs)
             obs, _, terminated, truncated, info = env.step(action)
             total_steps += 1
@@ -439,11 +447,15 @@ class EvaluationAgent:
 
     def _get_action(
         self,
-        model: torch.nn.Module,
+        model: Any,
         spec: dict[str, Any],
         obs: dict[str, Any],
     ) -> np.ndarray:
         """Run one forward pass and return the action as a numpy array."""
+        # Baseline policy uses only obs["state"] and obs["_vehicle_loc"]
+        if spec["type"] == "baseline":
+            return model.act(obs)
+
         cfg = self.cfg
         crop_cfg = cfg["crop"]
         is_ppo = spec["type"] == "ppo"
@@ -537,10 +549,10 @@ class EvaluationAgent:
 
     # -- Model loading ---------------------------------------------------------
 
-    def _load_models(self) -> list[tuple[dict[str, Any], torch.nn.Module]]:
-        """Load BC and PPO checkpoints for the current sensor suite."""
+    def _load_models(self) -> list[tuple[dict[str, Any], Any]]:
+        """Load BC, PPO checkpoints, and PID baseline for the current sensor suite."""
         cfg = self.cfg
-        results: list[tuple[dict[str, Any], torch.nn.Module]] = []
+        results: list[tuple[dict[str, Any], Any]] = []
 
         # BC model
         for spec in cfg["bc_model_specs"]:
@@ -561,6 +573,17 @@ class EvaluationAgent:
             }
             results.append((bc_spec, model))
             log.info("Loaded BC model from %s.", path.name)
+
+        # PID baseline policy (runs once per sensor suite — re-run per suite is intentional)
+        baseline = PIDBaselinePolicy(target_speed_kmh=30.0, lookahead_m=5.0, kp_steer=0.5)
+        baseline_spec = {
+            "name": f"pid_baseline_{self.sensor_suite}",
+            "type": "baseline",
+            "driving_style": "n/a",
+            "sensor_suite": self.sensor_suite,
+        }
+        results.append((baseline_spec, baseline))
+        log.info("PID baseline policy registered for %s.", self.sensor_suite)
 
         # PPO models (one per style)
         for style in _DRIVING_STYLES:
@@ -634,16 +657,18 @@ class EvaluationAgent:
             return
 
         summary: dict[str, Any] = {}
-        suites = list({r["sensor_suite"] for r in records})
+        # Exclude baseline records — significance tests compare sensor suites only
+        model_records = [r for r in records if r.get("model_type") != "baseline"]
+        suites = list({r["sensor_suite"] for r in model_records})
         for i, s1 in enumerate(suites):
             for s2 in suites[i + 1:]:
-                rc1 = [r["route_completion"] for r in records if r["sensor_suite"] == s1]
-                rc2 = [r["route_completion"] for r in records if r["sensor_suite"] == s2]
+                rc1 = [r["route_completion"] for r in model_records if r["sensor_suite"] == s1]
+                rc2 = [r["route_completion"] for r in model_records if r["sensor_suite"] == s2]
                 if len(rc1) >= 2 and len(rc2) >= 2:
                     _, p = stats.mannwhitneyu(rc1, rc2, alternative="two-sided")
                     key = f"mannwhitney_{s1}_vs_{s2}_p"
                     summary[key] = round(float(p), 6)
-                    log.info("Mann-Whitney U %s vs %s: p=%.4f", s1, s2, p)
+                    log.info("Mann-Whitney U %s vs %s: p=%.4f", s1, s2, float(p))
 
         summary_path = self.results_dir / "eval_summary.json"
         with open(summary_path, "w") as f:
@@ -731,4 +756,15 @@ class EvaluationAgent:
             "distance_m": 0.0,
             "survived": False,
             "total_steps": 0,
+            # Violation fields default to 0 so BenchmarkReport never hits a KeyError
+            "viol_red_light": 0,
+            "viol_wrong_way": 0,
+            "viol_off_road": 0,
+            "viol_double_solid": 0,
+            "viol_tier1_total": 0,
+            "viol_speeding_steps": 0,
+            "viol_tailgating_steps": 0,
+            "viol_stop_sign": 0,
+            "viol_solid_lane_steps": 0,
+            "viol_yield": 0,
         }

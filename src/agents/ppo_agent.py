@@ -53,7 +53,6 @@ import torch.optim as optim
 
 from src.carla_env import CarlaEnv
 from src.carla_utils import make_weather
-from src.road_rule_monitor import RoadRuleMonitor
 from src.config import load_config, require_keys
 from src.ppo import (
     ActorCritic,
@@ -63,6 +62,7 @@ from src.ppo import (
     ppo_update,
 )
 from src.preprocessing import RESIZE_H, RESIZE_W
+from src.road_rule_monitor import RoadRuleMonitor
 
 log = logging.getLogger(__name__)
 
