@@ -88,7 +88,7 @@ def encode_metadata(
     -------
     ndarray, shape (N, 5), dtype int8
     """
-    n = data["images"].shape[0]
+    n = data["actions"].shape[0]
     meta = np.zeros((n, 5), dtype=np.int8)
     meta[:, 0] = np.array(
         [weather_codes[w] for w in data["weather_preset"].astype(str)],

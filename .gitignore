@@ -5,7 +5,10 @@ data/
 models/
 results/
 logs/*.log
+logs/*.txt
 crash_diagnostic.log
+data_smoke/
+.playwright-mcp/
 *.egg-info/
 .ipynb_checkpoints/
 CARLA_0.9.16/

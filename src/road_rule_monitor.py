@@ -94,8 +94,13 @@ class RoadRuleMonitor(gymnasium.Wrapper):
 
     def __init__(self, env: gymnasium.Env) -> None:
         super().__init__(env)
-        # Per-episode counters and state machines reset in reset().
         self._wrong_way_counter = 0
+        self._red_light_counter = 0
+        self._off_road_counter = 0
+        self._prev_speed_kmh = 0.0
+        self._prev_in_junction = False
+        self._stop_sign_states: dict[int, dict] = {}
+        self._stop_sign_actors: list = []
 
     # -- Attribute forwarding -------------------------------------------------
     # gymnasium.Wrapper in v1.x does not define __getattr__, so we must
@@ -113,14 +118,6 @@ class RoadRuleMonitor(gymnasium.Wrapper):
     @property
     def map(self):
         return self.env.map
-        self._red_light_counter = 0
-        self._off_road_counter = 0
-        self._prev_speed_kmh = 0.0
-        self._prev_in_junction = False
-        # Keyed by stop-sign actor ID. Value: {in_zone, has_stopped, cooldown}.
-        self._stop_sign_states: dict[int, dict] = {}
-        # Cached stop sign actors (refreshed on reset -- static per town).
-        self._stop_sign_actors: list = []
 
     # -- Gymnasium interface ---------------------------------------------------
 

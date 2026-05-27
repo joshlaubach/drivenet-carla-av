@@ -116,7 +116,7 @@ def run_bc(suite: str, data_dir: Path, models_dir: Path, results_dir: Path) -> d
     t0 = time.time()
     agent = BehaviorCloningAgent(
         sensor_suite=suite,
-        data_dir=str(data_dir),
+        data_dir=str(data_dir / suite),
         save_dir=str(models_dir),
         results_dir=str(results_dir),
     )

@@ -6,6 +6,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Full three-suite expert dataset: 12 of 18 suite/town pairs collected
+  (single_cam $\times$ 4 towns, multi_cam $\times$ 3 towns, lidar $\times$ 5 towns) in a
+  10 h 22 min unattended run (2026-05-26); totals $\approx 201{,}600$ expert frames
+  across all suites; see `docs/scenario_coverage.md` for per-pair results and
+  failure root causes
+- `scripts/collect_all_suites.py`: overnight orchestrator that loops all three
+  sensor suites across six towns, retries each pair up to 3 times, validates
+  completion via on-disk chunk count (independent of subprocess exit code), and
+  uses PowerShell `Stop-Process` for reliable CARLA teardown on RTX 5080 Blackwell
+  (`taskkill` silently fails on dx12 Blackwell)
+- `os._exit()` at all exit paths in `collect_one_town.py` to bypass Python
+  interpreter shutdown while libcarla Boost.Asio threads are still alive;
+  prevents `STATUS_STACK_BUFFER_OVERRUN` (0xC0000409) during atexit on
+  RTX 5080 Blackwell
+
 ## [0.3.0] - 2026-03-01
 
 ### Added

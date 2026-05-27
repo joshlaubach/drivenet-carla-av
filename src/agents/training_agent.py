@@ -33,7 +33,7 @@ from src.dataset import DrivingDataset, GPUAugmenter
 from src.drivenet import DriveNet
 from src.drivenet_lidar import LidarDriveNet
 from src.drivenet_multicam import MultiCamDriveNet
-from src.preprocessing import crop_and_resize, encode_metadata
+from src.preprocessing import RESIZE_H, RESIZE_W, crop_and_resize, encode_metadata
 from src.training import evaluate, train_model
 
 log = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ class BehaviorCloningAgent:
         raw = self._load_all_chunks()  # images already cropped/resized inside
 
         log.info("Loaded %d frames.", raw["images"].shape[0])
-        images = raw["images"]  # already preprocessed to (N, RESIZE_H, RESIZE_W, 3)
+        images = raw["images"]  # shape varies by suite; always stored under "images"
         meta = encode_metadata(
             raw,
             cfg["weather_codes"],
@@ -205,9 +205,11 @@ class BehaviorCloningAgent:
     def _load_all_chunks(self) -> dict[str, np.ndarray]:
         """Load, preprocess, and concatenate all chunk NPZ files.
 
-        Images are cropped and resized immediately after loading each chunk so
-        only the small preprocessed arrays (200x100x3 uint8, ~144 MB/chunk) are
-        accumulated in RAM, not the raw 800x600x3 originals (~3.5 GB/chunk).
+        Payload key and preprocessing are selected by sensor suite:
+          single_cam  — key "images"       (N,H,W,3 uint8);  crop/resize each frame
+          multi_cam   — key "images_multi" (N,3,H,W,3 uint8); crop/resize each of 3 views
+          lidar       — key "bev"          (N,100,200,3 float32); already at model res, no-op
+        Result is always stored under "images" for uniform downstream access.
         """
         chunk_files = sorted(self.data_dir.rglob("chunk_*.npz"))
         if not chunk_files:
@@ -215,16 +217,38 @@ class BehaviorCloningAgent:
                 f"No chunk files found in {self.data_dir}. "
                 "Run DataCollectionAgent first."
             )
+
+        if self.sensor_suite == "single_cam":
+            payload_key = "images"
+        elif self.sensor_suite == "multi_cam":
+            payload_key = "images_multi"
+        else:  # lidar
+            payload_key = "bev"
+
         image_parts: list[np.ndarray] = []
         other_parts: dict[str, list[np.ndarray]] = {}
         for path in chunk_files:
             with np.load(path, allow_pickle=True) as chunk:
-                # Preprocess images immediately — releases raw 800x600 array on exit
-                image_parts.append(crop_and_resize(chunk["images"]))
+                raw_imgs = chunk[payload_key]
+                if self.sensor_suite == "single_cam":
+                    processed = crop_and_resize(raw_imgs)
+                elif self.sensor_suite == "multi_cam":
+                    # raw_imgs: (N, 3, H, W, 3) — crop/resize each view independently
+                    n_frames, n_cams = raw_imgs.shape[0], raw_imgs.shape[1]
+                    processed = np.empty(
+                        (n_frames, n_cams, RESIZE_H, RESIZE_W, 3), dtype=np.uint8
+                    )
+                    for cam in range(n_cams):
+                        processed[:, cam] = crop_and_resize(raw_imgs[:, cam])
+                else:  # lidar — BEV is already at model resolution, pass through
+                    processed = raw_imgs
+
+                image_parts.append(processed)
                 for key in chunk.files:
-                    if key != "images":
+                    if key != payload_key:
                         other_parts.setdefault(key, []).append(chunk[key])
             log.debug("Preprocessed %s (%d frames).", path.name, len(image_parts[-1]))
+
         result = {"images": np.concatenate(image_parts, axis=0)}
         result.update({k: np.concatenate(v, axis=0) for k, v in other_parts.items()})
         return result

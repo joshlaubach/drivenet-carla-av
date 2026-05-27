@@ -75,7 +75,11 @@ def main() -> int:
         )
     except Exception:
         logging.exception("Collection failed for %s", args.town)
-        return 2
+        sys.stdout.flush()
+        # Must use os._exit here too — return 2 routes through sys.exit() which
+        # runs Python cleanup while libcarla Boost.Asio threads are still alive,
+        # triggering STATUS_STACK_BUFFER_OVERRUN (0xC0000409) on RTX 5080.
+        os._exit(2)
 
     chunks = results.get(args.town, 0)
     logging.info(

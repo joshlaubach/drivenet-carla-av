@@ -104,11 +104,6 @@ class MultiCamDriveNet(nn.Module):
         -------
         Tensor, shape (B, 3) -- [steer, throttle, brake]
         """
-        # Accept single-camera (B, C, H, W) input by replicating across cameras.
-        # Training data is always single_cam; multi_cam training uses one view.
-        if images.dim() == 4:
-            images = images.unsqueeze(1).expand(-1, self.n_cameras, -1, -1, -1)
-
         # Process each camera through the shared backbone
         cam_feats = []
         for i in range(self.n_cameras):

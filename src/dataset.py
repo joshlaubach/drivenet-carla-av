@@ -71,9 +71,18 @@ class DrivingDataset(Dataset):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         img = self.images[self.indices[idx]]
         if isinstance(img, torch.Tensor):
-            img = img.permute(2, 0, 1).float() / 255.0
+            is_uint8 = img.dtype == torch.uint8
         else:
-            img = torch.from_numpy(img.copy()).permute(2, 0, 1).float() / 255.0
+            is_uint8 = img.dtype == np.uint8
+            img = torch.from_numpy(img.copy())
+        if img.ndim == 3:
+            # single_cam / lidar: (H, W, C) → (C, H, W)
+            img = img.permute(2, 0, 1).float()
+        else:
+            # multi_cam: (n_cam, H, W, C) → (n_cam, C, H, W)
+            img = img.permute(0, 3, 1, 2).float()
+        if is_uint8:
+            img = img / 255.0
         return img, self.states[idx], self.actions[idx], self.meta[idx]
 
 

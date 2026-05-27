@@ -330,8 +330,9 @@ class DataCollectionAgent:
     def _kill_carla(self, proc: subprocess.Popen | None = None) -> None:
         """Terminate CARLA server process(es).
 
-        Kills the specific process if given, plus any stray CARLA instances
-        via taskkill (Windows).
+        Kills the specific process if given, plus any stray CARLA instances.
+        Uses PowerShell Stop-Process on Windows (taskkill silently fails on
+        RTX 5080 Blackwell with the dx12 renderer).
         """
         if proc is not None:
             try:
@@ -341,16 +342,30 @@ class DataCollectionAgent:
                 proc.kill()
             log.info("Terminated CARLA process PID %d.", proc.pid)
 
-        # Belt-and-suspenders: kill any leftover CARLA processes
-        for exe_name in ["CarlaUE4-Win64-Shipping.exe", "CarlaUE4.exe"]:
-            try:
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", exe_name],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except FileNotFoundError:
-                pass  # Not on Windows
+        # PowerShell Stop-Process is reliable on RTX 5080 where taskkill fails
+        try:
+            subprocess.run(
+                [
+                    "powershell", "-NoProfile", "-Command",
+                    "Get-Process -Name 'CarlaUE4*' -ErrorAction SilentlyContinue"
+                    " | Stop-Process -Force",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+            log.info("PowerShell Stop-Process: CARLA killed (or was not running).")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            # Fallback on non-Windows or if powershell is unavailable
+            for exe_name in ["CarlaUE4-Win64-Shipping.exe", "CarlaUE4.exe"]:
+                try:
+                    subprocess.run(
+                        ["taskkill", "/F", "/IM", exe_name],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                except FileNotFoundError:
+                    pass
 
     # -- Condition iteration ---------------------------------------------------
 
@@ -515,9 +530,9 @@ class DataCollectionAgent:
 
         if actor is not None:
             self._follow_car = actor
-            log.debug("Follow car spawned (id=%d).", actor.id)
+            log.info("Follow car spawned (id=%d) at %s.", actor.id, spawn_transform.location)
         else:
-            log.debug("Could not spawn follow car -- continuing without.")
+            log.warning("Could not spawn follow car -- continuing without.")
 
     def _update_follow_car(self, env: CarlaEnv) -> None:
         """Apply one tick of PID-like control to keep the follower behind the ego.
