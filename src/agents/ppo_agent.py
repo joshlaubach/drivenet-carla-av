@@ -347,6 +347,9 @@ class PPOAgent:
 
             speed_kmh = info["speed_kmh"]
             current_steer = float(action_np[0])
+            next_state = next_obs["state"]
+            speed_limit_kmh = float(next_state[3]) * 130.0
+            is_junction = bool(next_state[5])
             reward = compute_style_reward(
                 base_reward=reward,
                 speed_kmh=speed_kmh,
@@ -359,6 +362,8 @@ class PPOAgent:
                 steer=current_steer,
                 prev_steer=prev_steer,
                 first_step=first_step,
+                speed_limit_kmh=speed_limit_kmh,
+                is_junction=is_junction,
             )
 
             prev_prev_speed_kmh = prev_speed_kmh
