@@ -47,6 +47,8 @@ def compute_style_reward(
     steer: float = 0.0,
     prev_steer: float = 0.0,
     first_step: bool = False,
+    speed_limit_kmh: float = 50.0,
+    is_junction: bool = False,
 ) -> float:
     """Apply style-dependent jerk, speed, lane-change, and steering terms.
 
@@ -67,6 +69,11 @@ def compute_style_reward(
     first_step : bool
         True on the first step of an episode. Skips jerk, steer-rate, and
         lane-change penalties which require valid history to be meaningful.
+    speed_limit_kmh : float
+        Posted speed limit at the current waypoint in km/h.
+    is_junction : bool
+        True when the vehicle is inside a junction. Speed bonus is zeroed
+        at junctions to avoid incentivising dangerous intersection entry.
 
     Returns
     -------
@@ -75,7 +82,12 @@ def compute_style_reward(
     """
     reward = base_reward
 
-    reward += (speed_kmh / SPEED_BONUS_REF_KMH) * style_weights["speed_bonus"]
+    if not is_junction and speed_limit_kmh > 0.0:
+        # Reward closing in on the speed limit; cap at 1.0 so exceeding it
+        # adds no extra incentive (the speeding penalty in RoadRuleMonitor
+        # already handles the downside).
+        speed_frac = min(speed_kmh / speed_limit_kmh, 1.0)
+        reward += speed_frac * style_weights["speed_bonus"]
 
     if not first_step:
         accel_now = (speed_kmh - prev_speed_kmh) / dt

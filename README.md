@@ -14,6 +14,7 @@
 - [Driving Personalities](#driving-personalities)
 - [What the Car Learned](#what-the-car-learned)
 - [What's Next: Road to Real Deployment](#whats-next-road-to-real-deployment)
+- [Design Decisions Q&A](#design-decisions-qa)
 - [For Engineers](#for-engineers)
 
 ---
@@ -203,6 +204,38 @@ The clearest next steps: fine-tune on real dashcam footage to close the visual g
 
 ---
 
+## Design Decisions Q&A
+
+**Why PPO instead of SAC or another off-policy algorithm?**
+
+The honest answer is that CARLA makes data cheap but time expensive. SAC keeps a replay buffer of old transitions and squeezes multiple gradient updates out of each one, which sounds great until you remember that spinning up a fresh CARLA process per town takes about a minute and each rollout is fixed-length. You're not in a regime where you're starving for data — you're in a regime where reusing stale transitions from an older policy version quietly destabilizes training. PPO throws the data away after each update and that's fine here, because the next rollout is only a town restart away. SAC would probably converge faster on a cheap simulator where resets are free. On this hardware and this simulator, PPO just behaves more reliably.
+
+---
+
+**Why pretrain with behavior cloning before running PPO?**
+
+Start PPO from a random initialization and the first few hundred episodes look like someone handed the keys to a golden retriever. The car drives into walls, spins in place, occasionally gets going in the right direction by accident. The reward signal is basically flat because the policy never reaches the interesting parts of the state space — intersections, lane changes, merging — where the rules actually kick in. Behavior cloning fixes the cold start: the network watches 97,000 frames of the CARLA autopilot and learns to roughly copy it. It's not great driving, but it's driving. PPO picks up from there, and because the policy already knows how to stay on the road, rollouts immediately land in states where the reward has something to say. The main thing to watch out for is that a policy too attached to its BC initialization won't explore aggressively enough — PPO's clipping naturally limits how far it can stray in any one update, which helps.
+
+---
+
+**What would break in sim-to-real transfer?**
+
+A few things, and they compound each other. The most immediate is just that CARLA cameras are too clean. No motion blur, no lens flare, no rain on the glass, no compression noise. The model learned to read lane markings from perfect pixels. Real dashcam footage looks nothing like that, and the CNN features that light up on a clean sim image may not activate the same way on a noisy real one.
+
+Below that is the dynamics gap. CARLA's physics are simplified — no tire slip, no real suspension, no actuator lag. On a real car, if you command a steering angle, the wheels get there maybe 100 milliseconds later. The policy doesn't know that. Moves that feel smooth in sim can oscillate or overshoot when the control loop has real latency.
+
+The hardest part is the scenario gap. Every piece of training data came from a scripted simulator where other cars follow rules and pedestrians are predictable. Real urban driving is full of situations CARLA doesn't model at all: a delivery truck double-parked in your lane, a cyclist blowing through a red, someone reversing out of a driveway at speed. The causal analysis in Notebook 05 shows which training conditions already hurt performance in sim — those are probably the first things to break on a real road.
+
+---
+
+**What does the reward function incentivize that it shouldn't?**
+
+The original speed bonus was the main problem — it added a reward every step proportional to raw speed with no sense of context. At an uncontrolled intersection the car was simultaneously being rewarded for going fast and penalized for entering above 10 km/h. If the speed weight was large enough relative to the yield penalty, the policy could quietly learn that blowing through intersections was net positive, especially when cross-traffic happened to be absent. The fix was to make the bonus relative to the posted speed limit and zero it out inside junctions entirely, so the yield and red-light rules are the only signal that matters there. The bonus now maxes out at 1.0 when the car hits the limit — exceeding it adds nothing, and the Layer 2 speeding penalty handles the downside.
+
+The jerk penalty has a subtler residual issue. It's there to encourage smooth, comfortable driving, and it does that. But it also fires when the car brakes hard in an emergency. A policy that sees an obstacle and slams the brakes gets dinged for jerkiness even though that was the right call. It's a minor effect during training but worth knowing — the reward was designed for comfort and it accidentally cuts into safety-critical behavior.
+
+---
+
 ## For Engineers
 
 ### Prerequisites
@@ -316,9 +349,9 @@ Every violation is reported in `info["road_rule_monitor"]` each step.
 
 **Layer 3: `compute_style_reward()`** (Tier 3 comfort shaping, applied in `PPOAgent._collect_rollout()`):
 
-$$r_\text{shaped} = r_\text{base} + w_v\cdot\frac{v}{40} - w_J\cdot\frac{J}{1000} - w_\delta\cdot\frac{|\dot{\delta}|}{10} - w_\ell\cdot\mathbb{1}[\text{lane change}]$$
+$$r_\text{shaped} = r_\text{base} + w_v\cdot\min\!\left(\frac{v}{v_\text{lim}},1\right)\cdot\mathbb{1}[\lnot\text{junction}] - w_J\cdot\frac{J}{1000} - w_\delta\cdot\frac{|\dot{\delta}|}{10} - w_\ell\cdot\mathbb{1}[\text{lane change}]$$
 
-where $J = \dfrac{|\dot{v}_t - \dot{v}_{t-1}|}{\Delta t}$ is jerk and $|\dot{\delta}|$ is steering rate. Weights come from `configs/ppo.yaml`:
+where $J = \dfrac{|\dot{v}_t - \dot{v}_{t-1}|}{\Delta t}$ is jerk, $|\dot{\delta}|$ is steering rate, and $v_\text{lim}$ is the posted speed limit at the current waypoint. The speed bonus is capped at 1.0 so exceeding the limit adds no extra incentive (the Layer 2 speeding penalty already handles that), and it is zeroed inside junctions where the yield and red-light rules should dominate. Weights come from `configs/ppo.yaml`:
 
 | Style | $w_v$ | $w_J$ | $w_\delta$ | $w_\ell$ |
 |-------|-------|-------|-----------|---------|
