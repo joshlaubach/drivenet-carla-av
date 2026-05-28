@@ -142,13 +142,14 @@ def train_model(
         history["val_throttle_mse"].append(float(val_per_target[1]))
         history["val_brake_mse"].append(float(val_per_target[2]))
 
-        is_best = val_loss < best_val_loss
+        is_best = not (val_loss != val_loss) and val_loss < best_val_loss  # False if NaN
         marker = " *" if is_best else ""
         print(
             f"Epoch {epoch + 1:>{epoch_width}}/{max_epochs}  "
             f"train={train_loss:.6f}  val={val_loss:.6f}  "
             f"[s={val_per_target[0]:.4f} t={val_per_target[1]:.4f} "
-            f"b={val_per_target[2]:.4f}]  lr={lr:.2e}{marker}"
+            f"b={val_per_target[2]:.4f}]  lr={lr:.2e}{marker}",
+            flush=True,
         )
 
         if is_best:
@@ -162,7 +163,7 @@ def train_model(
             patience_counter += 1
 
         if patience_counter >= early_stop_patience:
-            print(f"Early stopping at epoch {epoch + 1}")
+            print(f"Early stopping at epoch {epoch + 1}", flush=True)
             break
 
     elapsed = time.time() - t0
@@ -170,9 +171,10 @@ def train_model(
     print(
         f"Training complete: {history['epochs_trained']} epochs in "
         f"{elapsed / 60:.1f} min, best val={history['best_val_loss']:.6f} "
-        f"at epoch {history['best_epoch']}"
+        f"at epoch {history['best_epoch']}",
+        flush=True,
     )
-    print(f"Checkpoint saved: {checkpoint_path}")
+    print(f"Checkpoint saved: {checkpoint_path}", flush=True)
 
     if history["best_epoch"] == history["epochs_trained"]:
         log.warning(
@@ -180,7 +182,10 @@ def train_model(
             "-- consider increasing max_epochs.", history["epochs_trained"],
         )
 
-    model.load_state_dict(best_state_dict)
+    if best_state_dict is not None:
+        model.load_state_dict(best_state_dict)
+    else:
+        log.warning("No improvement was recorded during training — model weights unchanged.")
     return history
 
 

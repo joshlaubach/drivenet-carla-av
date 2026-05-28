@@ -27,10 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import random
-import socket
-import subprocess
 import time
 import weakref
 from pathlib import Path
@@ -45,7 +42,7 @@ from scipy import stats
 
 from src.baseline import PIDBaselinePolicy
 from src.carla_env import CarlaEnv
-from src.carla_utils import make_weather
+from src.carla_utils import kill_carla, launch_carla, make_weather, wait_for_carla
 from src.config import load_config, require_keys
 from src.drivenet import DriveNet
 from src.drivenet_lidar import LidarDriveNet
@@ -676,63 +673,14 @@ class EvaluationAgent:
 
     # -- CARLA lifecycle -------------------------------------------------------
 
-    def _launch_carla(self) -> subprocess.Popen:
-        if not self.carla_exe.exists():
-            raise FileNotFoundError(
-                f"CARLA executable not found: {self.carla_exe}."
-            )
-        cmd = [
-            str(self.carla_exe),
-            "-dx12", "-quality-level=Low", "-fps=20",
-            "-benchmark", "-windowed", "-ResX=800", "-ResY=600",
-            "-nosound", "-NoSplash",
-        ]
-        env_vars = dict(os.environ)
-        env_vars["DXGI_GPU_PREFERENCE"] = "2"
-        proc = subprocess.Popen(
-            cmd, env=env_vars,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        log.info("CARLA process started (PID %d).", proc.pid)
-        return proc
+    def _launch_carla(self):
+        return launch_carla(self.carla_exe)
 
-    def _wait_for_carla(
-        self, max_wait: float = 40.0, poll_interval: float = 3.0
-    ) -> None:
-        deadline = time.time() + max_wait
-        while time.time() < deadline:
-            try:
-                with socket.create_connection((self.host, self.port), timeout=2.0):
-                    log.info("CARLA is reachable.")
-                    time.sleep(5.0)
-                    return
-            except (ConnectionRefusedError, OSError):
-                time.sleep(poll_interval)
-        raise TimeoutError(
-            f"CARLA did not become reachable within {max_wait:.0f}s."
-        )
+    def _wait_for_carla(self, max_wait: float = 60.0, poll_interval: float = 3.0) -> None:
+        wait_for_carla(self.host, self.port, max_wait=max_wait, poll_interval=poll_interval)
 
-    def _kill_carla(self, proc: subprocess.Popen | None = None) -> None:
-        if proc is not None:
-            try:
-                proc.terminate()
-                proc.wait(timeout=10)
-            except (subprocess.TimeoutExpired, OSError):
-                proc.kill()
-            log.info("Terminated CARLA PID %d.", proc.pid)
-        try:
-            subprocess.run(
-                [
-                    "powershell", "-NonInteractive", "-Command",
-                    "Get-Process -Name 'CarlaUE4*' -ErrorAction SilentlyContinue"
-                    " | Stop-Process -Force -ErrorAction SilentlyContinue",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=15,
-            )
-        except Exception:
-            pass
+    def _kill_carla(self, proc=None) -> None:
+        kill_carla(proc)
 
     # -- Helpers ---------------------------------------------------------------
 

@@ -30,7 +30,7 @@ from typing import Any, Callable
 
 import numpy as np
 from scipy import stats
-from scipy.spatial import cKDTree
+from scipy.optimize import linear_sum_assignment
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import LabelEncoder
 
@@ -43,7 +43,8 @@ class CausalAnalysisAgent:
     """Estimates causal effects of driving conditions on model performance via
     propensity score matching, per workflows/05_causal_analysis.md.
 
-    Does not implement PSM math -- sequences LogisticRegression, cKDTree,
+    Does not implement PSM math -- sequences LogisticRegression,
+    linear_sum_assignment (optimal 1:1 matching without replacement),
     bootstrap resampling, and Rosenbaum sensitivity bounds.
     """
 
@@ -205,14 +206,20 @@ class CausalAnalysisAgent:
         pscore_treated = pscore[T == 1]
         pscore_control = pscore[T == 0]
 
-        # 1:1 nearest-neighbour matching without replacement
-        tree = cKDTree(pscore_control.reshape(-1, 1))
-        _, nn_indices = tree.query(pscore_treated.reshape(-1, 1), k=1)
-        control_pool = np.array([i for i, t in enumerate(T) if t == 0])
-        matched_control_local = control_pool[nn_indices]
+        # Optimal 1:1 matching without replacement via linear sum assignment.
+        # Cost matrix: |pscore_treated[i] - pscore_control[j]| — shape (n_t, n_c).
+        # linear_sum_assignment minimises total cost, selecting at most min(n_t, n_c) pairs.
+        cost = np.abs(pscore_treated[:, None] - pscore_control[None, :])
+        row_ind, col_ind = linear_sum_assignment(cost)
+        # Keep only the matched subset (row_ind is a contiguous range when n_t <= n_c)
+        pscore_treated = pscore_treated[row_ind]
+        control_pool = np.where(T == 0)[0]
+        matched_control_local = control_pool[col_ind]
+        pscore_control_matched = pscore_control[col_ind]
 
         outcome = df[treatment["outcome"]]
-        outcomes_treated = outcome[np.where(T == 1)[0]]
+        treated_pool = np.where(T == 1)[0]
+        outcomes_treated = outcome[treated_pool[row_ind]]
         outcomes_control = outcome[matched_control_local]
 
         ate = float(np.mean(outcomes_treated) - np.mean(outcomes_control))
@@ -245,7 +252,7 @@ class CausalAnalysisAgent:
         try:
             self._plot_pscore(
                 pscore_treated, pscore_control,
-                pscore_treated, pscore_control[nn_indices],
+                pscore_treated, pscore_control_matched,
                 treatment["name"],
             )
         except Exception as exc:

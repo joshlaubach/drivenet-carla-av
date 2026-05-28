@@ -329,14 +329,14 @@ class TestPIDBaselinePolicy:
     def test_throttle_in_range(self):
         pid = PIDBaselinePolicy(target_speed_kmh=30.0)
         action = pid.act(_pid_obs(speed_kmh=0.0))
-        assert 0.0 <= action[0] <= 1.0
+        assert 0.0 <= action[1] <= 1.0
 
     def test_steer_in_range(self):
         pid = PIDBaselinePolicy()
         waypoints = [MockLoc(10, 0), MockLoc(20, 5), MockLoc(30, 10)]
         pid.set_route(waypoints)
         action = pid.act(_pid_obs(vehicle_loc=(0.0, 0.0)))
-        assert -1.0 <= action[1] <= 1.0
+        assert -1.0 <= action[0] <= 1.0
 
     def test_brake_in_range(self):
         pid = PIDBaselinePolicy(target_speed_kmh=10.0)
@@ -346,25 +346,25 @@ class TestPIDBaselinePolicy:
     def test_throttle_positive_when_below_target(self):
         pid = PIDBaselinePolicy(target_speed_kmh=40.0)
         action = pid.act(_pid_obs(speed_kmh=0.0))
-        assert action[0] > 0.0
+        assert action[1] > 0.0
 
     def test_brake_applied_when_well_above_target(self):
         pid = PIDBaselinePolicy(target_speed_kmh=10.0)
         action = pid.act(_pid_obs(speed_kmh=60.0))
         assert action[2] > 0.0
-        assert action[0] == pytest.approx(0.0)
+        assert action[1] == pytest.approx(0.0)
 
     def test_steer_zero_without_waypoints(self):
         pid = PIDBaselinePolicy()
         action = pid.act(_pid_obs(vehicle_loc=(0.0, 0.0)))
-        assert action[1] == pytest.approx(0.0)
+        assert action[0] == pytest.approx(0.0)
 
     def test_steer_zero_without_vehicle_loc(self):
         pid = PIDBaselinePolicy()
         waypoints = [MockLoc(10, 0)]
         pid.set_route(waypoints)
         action = pid.act(_pid_obs())  # no _vehicle_loc
-        assert action[1] == pytest.approx(0.0)
+        assert action[0] == pytest.approx(0.0)
 
     def test_reset_clears_route(self):
         pid = PIDBaselinePolicy()

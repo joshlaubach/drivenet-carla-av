@@ -148,12 +148,6 @@ class CarlaEnv(gymnasium.Env):
                 "'ready' message before running this notebook."
             ) from exc
 
-        # client.load_world() works at runtime on RTX 5000-series (Blackwell)
-        # GPUs when CARLA is launched with -dx12 (the project default in
-        # scripts/launch_carla.bat). -dx11 alone deadlocks the camera
-        # rendering pipeline after ~5 frames; -dx12 avoids that deadlock and
-        # also permits in-place map switches. See scenarios 10 and 20 in
-        # tests/test_crash_scenarios.py for the empirical evidence.
         _init_world = self.client.get_world()
         try:
             _init_world.wait_for_tick(seconds=15.0)
@@ -161,12 +155,15 @@ class CarlaEnv(gymnasium.Env):
             pass
         _map_short = _short_map_name(_init_world.get_map().name)
         _town_short = _short_map_name(town)
-        if _town_short == _map_short:
-            self.world = _init_world
-        else:
-            self.client.load_world(_town_short)
-            time.sleep(3.0)
-            self.world = _wait_for_map(self.client, _town_short, timeout=60.0)
+        if _town_short != _map_short:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "Requested town %s but server is on %s — proceeding with %s. "
+                "Kill and relaunch CARLA on the correct map to avoid this.",
+                _town_short, _map_short, _map_short,
+            )
+            self.town = _map_short
+        self.world = _init_world
         self.world.set_weather(carla.WeatherParameters.ClearNoon)
 
         settings = self.world.get_settings()

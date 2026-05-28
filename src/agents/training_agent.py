@@ -33,10 +33,31 @@ from src.dataset import DrivingDataset, GPUAugmenter
 from src.drivenet import DriveNet
 from src.drivenet_lidar import LidarDriveNet
 from src.drivenet_multicam import MultiCamDriveNet
-from src.preprocessing import crop_and_resize, encode_metadata
+from src.preprocessing import RESIZE_H, RESIZE_W, crop_and_resize, encode_metadata
 from src.training import evaluate, train_model
 
 log = logging.getLogger(__name__)
+
+# Maps sensor_suite → (npz_key, preprocess_fn).
+# preprocess_fn signature: (raw: np.ndarray) -> np.ndarray
+def _preprocess_single(raw: np.ndarray) -> np.ndarray:
+    return crop_and_resize(raw)
+
+def _preprocess_multi(raw: np.ndarray) -> np.ndarray:
+    n_frames, n_cams = raw.shape[0], raw.shape[1]
+    out = np.empty((n_frames, n_cams, RESIZE_H, RESIZE_W, 3), dtype=np.uint8)
+    for cam in range(n_cams):
+        out[:, cam] = crop_and_resize(raw[:, cam])
+    return out
+
+def _preprocess_lidar(raw: np.ndarray) -> np.ndarray:
+    return raw  # BEV is already at model resolution
+
+_SUITE_LOADER: dict[str, tuple[str, object]] = {
+    "single_cam": ("images",       _preprocess_single),
+    "multi_cam":  ("images_multi", _preprocess_multi),
+    "lidar":      ("bev",          _preprocess_lidar),
+}
 
 
 class BehaviorCloningAgent:
@@ -100,7 +121,11 @@ class BehaviorCloningAgent:
         raw = self._load_all_chunks()  # images already cropped/resized inside
 
         log.info("Loaded %d frames.", raw["images"].shape[0])
-        images = raw["images"]  # already preprocessed to (N, RESIZE_H, RESIZE_W, 3)
+        images = raw["images"]  # shape varies by suite; always stored under "images"
+        # States are passed raw (5-D) to DrivingDataset, which normalises them
+        # internally to the 6-D format expected by DriveNet.  Do NOT call
+        # normalize_states() here -- it would double-normalise and corrupt the
+        # heading, speed, and lane-count features before the dataset sees them.
         meta = encode_metadata(
             raw,
             cfg["weather_codes"],
@@ -123,11 +148,14 @@ class BehaviorCloningAgent:
         test_ds  = DrivingDataset(images, raw["states"], raw["actions"], meta, test_idx)
 
         train_loader = DataLoader(train_ds, batch_size=cfg["batch_size"],
-                                  shuffle=True,  num_workers=0, pin_memory=True)
+                                  shuffle=True,  num_workers=4, pin_memory=True,
+                                  persistent_workers=True)
         val_loader   = DataLoader(val_ds,   batch_size=cfg["batch_size"],
-                                  shuffle=False, num_workers=0, pin_memory=True)
+                                  shuffle=False, num_workers=2, pin_memory=True,
+                                  persistent_workers=True)
         test_loader  = DataLoader(test_ds,  batch_size=cfg["batch_size"],
-                                  shuffle=False, num_workers=0, pin_memory=True)
+                                  shuffle=False, num_workers=2, pin_memory=True,
+                                  persistent_workers=True)
 
         model = self._build_model().to(self.device)
         optimizer = torch.optim.Adam(
@@ -205,9 +233,11 @@ class BehaviorCloningAgent:
     def _load_all_chunks(self) -> dict[str, np.ndarray]:
         """Load, preprocess, and concatenate all chunk NPZ files.
 
-        Images are cropped and resized immediately after loading each chunk so
-        only the small preprocessed arrays (200x100x3 uint8, ~144 MB/chunk) are
-        accumulated in RAM, not the raw 800x600x3 originals (~3.5 GB/chunk).
+        Payload key and preprocessing are selected by sensor suite:
+          single_cam  — key "images"       (N,H,W,3 uint8);  crop/resize each frame
+          multi_cam   — key "images_multi" (N,3,H,W,3 uint8); crop/resize each of 3 views
+          lidar       — key "bev"          (N,100,200,3 float32); already at model res, no-op
+        Result is always stored under "images" for uniform downstream access.
         """
         chunk_files = sorted(self.data_dir.rglob("chunk_*.npz"))
         if not chunk_files:
@@ -215,16 +245,23 @@ class BehaviorCloningAgent:
                 f"No chunk files found in {self.data_dir}. "
                 "Run DataCollectionAgent first."
             )
+
+        payload_key, preprocess_fn = _SUITE_LOADER[self.sensor_suite]
+
         image_parts: list[np.ndarray] = []
         other_parts: dict[str, list[np.ndarray]] = {}
         for path in chunk_files:
-            with np.load(path, allow_pickle=True) as chunk:
-                # Preprocess images immediately — releases raw 800x600 array on exit
-                image_parts.append(crop_and_resize(chunk["images"]))
-                for key in chunk.files:
-                    if key != "images":
-                        other_parts.setdefault(key, []).append(chunk[key])
-            log.debug("Preprocessed %s (%d frames).", path.name, len(image_parts[-1]))
+            try:
+                with np.load(path, allow_pickle=True) as chunk:
+                    processed = preprocess_fn(chunk[payload_key])
+                    image_parts.append(processed)
+                    for key in chunk.files:
+                        if key != payload_key:
+                            other_parts.setdefault(key, []).append(chunk[key])
+                log.debug("Preprocessed %s (%d frames).", path.name, len(image_parts[-1]))
+            except Exception as exc:
+                log.warning("Skipping corrupt chunk %s: %s", path, exc)
+
         result = {"images": np.concatenate(image_parts, axis=0)}
         result.update({k: np.concatenate(v, axis=0) for k, v in other_parts.items()})
         return result

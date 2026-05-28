@@ -32,8 +32,6 @@ from __future__ import annotations
 import logging
 import math
 import random
-import socket
-import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -42,6 +40,7 @@ import carla
 import numpy as np
 
 from src.carla_env import CarlaEnv
+from src.carla_utils import kill_carla, launch_carla, wait_for_carla
 from src.config import load_config, require_keys
 
 log = logging.getLogger(__name__)
@@ -225,7 +224,6 @@ class DataCollectionAgent:
             carla_proc = self._launch_carla(town)
             try:
                 self._wait_for_carla(startup_wait)
-                self._load_town(town)
                 self.run()
                 results[town] = self._chunk_index
             except Exception as exc:
@@ -240,117 +238,14 @@ class DataCollectionAgent:
 
     # -- CARLA process management ----------------------------------------------
 
-    def _launch_carla(self, _town: str) -> subprocess.Popen:
-        """Launch a CARLA server process in the background.
+    def _launch_carla(self, _town: str):
+        return launch_carla(self.carla_exe)
 
-        *_town* is accepted for call-site clarity but is not passed on the
-        command line -- CARLA ignores CLI map args.  The map is loaded
-        afterward via ``_load_town()``.
+    def _wait_for_carla(self, max_wait: float = 60.0, poll_interval: float = 3.0) -> None:
+        wait_for_carla(self.host, self.port, max_wait=max_wait, poll_interval=poll_interval)
 
-        Uses the same flags as scripts/launch_carla.bat: -dx12, low quality,
-        20 FPS, benchmark mode, small viewport, no sound.
-        """
-        cmd = [
-            str(self.carla_exe),
-            "-dx12",
-            "-quality-level=Low",
-            "-fps=20",
-            "-benchmark",
-            "-windowed",
-            "-ResX=800",
-            "-ResY=600",
-            "-nosound",
-            "-NoSplash",
-        ]
-        log.info("Launching CARLA: %s", " ".join(cmd))
-
-        env_vars = dict(__import__("os").environ)
-        env_vars["DXGI_GPU_PREFERENCE"] = "2"
-
-        proc = subprocess.Popen(
-            cmd,
-            env=env_vars,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        log.info("CARLA process started (PID %d).", proc.pid)
-        return proc
-
-    def _wait_for_carla(
-        self,
-        max_wait: float = 40.0,
-        poll_interval: float = 3.0,
-    ) -> None:
-        """Block until CARLA accepts TCP connections on self.port."""
-        deadline = time.time() + max_wait
-        log.info(
-            "Waiting up to %.0fs for CARLA on %s:%d ...",
-            max_wait, self.host, self.port,
-        )
-        while time.time() < deadline:
-            try:
-                with socket.create_connection(
-                    (self.host, self.port), timeout=2.0
-                ):
-                    log.info("CARLA is reachable.")
-                    # Extra settle time for world initialization
-                    time.sleep(5.0)
-                    return
-            except (ConnectionRefusedError, OSError):
-                time.sleep(poll_interval)
-
-        raise TimeoutError(
-            f"CARLA did not become reachable on {self.host}:{self.port} "
-            f"within {max_wait:.0f}s."
-        )
-
-    def _load_town(self, town: str) -> None:
-        """Load the target town map via client.load_world().
-
-        This is called immediately after a fresh CARLA launch -- the
-        load_world crash only happens when switching maps on a running
-        server, not on the first load after startup.
-        """
-        client = carla.Client(self.host, self.port)
-        client.set_timeout(30.0)
-        current_map = client.get_world().get_map().name
-        current_short = current_map.split("/")[-1]
-
-        if town in current_short or current_short in town:
-            log.info("Town %s already loaded (%s).", town, current_map)
-            return
-
-        log.info("Loading town %s (current: %s) ...", town, current_map)
-        client.load_world(town)
-        # Wait for the new world to stabilise
-        time.sleep(5.0)
-        new_map = client.get_world().get_map().name
-        log.info("Town loaded: %s", new_map)
-
-    def _kill_carla(self, proc: subprocess.Popen | None = None) -> None:
-        """Terminate CARLA server process(es).
-
-        Kills the specific process if given, plus any stray CARLA instances
-        via taskkill (Windows).
-        """
-        if proc is not None:
-            try:
-                proc.terminate()
-                proc.wait(timeout=10)
-            except (subprocess.TimeoutExpired, OSError):
-                proc.kill()
-            log.info("Terminated CARLA process PID %d.", proc.pid)
-
-        # Belt-and-suspenders: kill any leftover CARLA processes
-        for exe_name in ["CarlaUE4-Win64-Shipping.exe", "CarlaUE4.exe"]:
-            try:
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", exe_name],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except FileNotFoundError:
-                pass  # Not on Windows
+    def _kill_carla(self, proc=None) -> None:
+        kill_carla(proc)
 
     # -- Condition iteration ---------------------------------------------------
 
@@ -515,9 +410,9 @@ class DataCollectionAgent:
 
         if actor is not None:
             self._follow_car = actor
-            log.debug("Follow car spawned (id=%d).", actor.id)
+            log.info("Follow car spawned (id=%d) at %s.", actor.id, spawn_transform.location)
         else:
-            log.debug("Could not spawn follow car -- continuing without.")
+            log.warning("Could not spawn follow car -- continuing without.")
 
     def _update_follow_car(self, env: CarlaEnv) -> None:
         """Apply one tick of PID-like control to keep the follower behind the ego.

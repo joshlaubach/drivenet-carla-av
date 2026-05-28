@@ -52,7 +52,7 @@ class PIDBaselinePolicy:
         self._wp_idx = 0
 
     def act(self, obs: dict[str, Any]) -> np.ndarray:
-        """Return [throttle, steer, brake] given the current observation.
+        """Return [steer, throttle, brake] given the current observation.
 
         obs["state"] : 6-dim [speed/60, sin_h, cos_h, speed_lim/130, lanes/4, junction]
         obs["_vehicle_loc"] : (x, y) tuple injected by EvaluationAgent
@@ -72,7 +72,7 @@ class PIDBaselinePolicy:
         # Steering: pure pursuit toward next waypoint
         steer = self._compute_steer(obs.get("_vehicle_loc"), sin_h, cos_h)
 
-        return np.array([throttle, steer, brake], dtype=np.float32)
+        return np.array([steer, throttle, brake], dtype=np.float32)
 
     def _compute_steer(
         self,

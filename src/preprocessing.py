@@ -60,6 +60,34 @@ def preprocess_obs(obs: dict[str, np.ndarray]) -> tuple[torch.Tensor, torch.Tens
     return img_t, state_t
 
 
+def normalize_states(states_raw: np.ndarray) -> np.ndarray:
+    """Convert raw 5-D state array (from collection_agent) to normalized 6-D state.
+
+    Raw layout stored in chunk NPZs:
+        [speed_kmh, heading_deg, speed_limit_kmh, lane_count, is_junction]
+
+    Normalized layout expected by DriveNet (matches CLAUDE.md state vector):
+        [speed/60, sin(heading), cos(heading), speed_limit/130, lane_count/4, is_junction]
+
+    Parameters
+    ----------
+    states_raw : ndarray, shape (N, 5), dtype float32
+
+    Returns
+    -------
+    ndarray, shape (N, 6), dtype float32
+    """
+    h_rad = np.deg2rad(states_raw[:, 1])
+    return np.column_stack([
+        states_raw[:, 0] / 60.0,
+        np.sin(h_rad),
+        np.cos(h_rad),
+        states_raw[:, 2] / 130.0,
+        states_raw[:, 3] / 4.0,
+        states_raw[:, 4],
+    ]).astype(np.float32)
+
+
 def encode_metadata(
     data: dict[str, np.ndarray],
     weather_codes: dict[str, int],
@@ -88,7 +116,7 @@ def encode_metadata(
     -------
     ndarray, shape (N, 5), dtype int8
     """
-    n = data["images"].shape[0]
+    n = data["actions"].shape[0]
     meta = np.zeros((n, 5), dtype=np.int8)
     meta[:, 0] = np.array(
         [weather_codes[w] for w in data["weather_preset"].astype(str)],
