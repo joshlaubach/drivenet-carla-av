@@ -6,14 +6,12 @@ pytest.importorskip("carla", reason="CARLA Python API not available")
 
 
 def test_import_all_agents() -> None:
-    """All 5 agents should be importable from the agents package."""
-    from src.agents import (
-        BehaviorCloningAgent,
-        CausalAnalysisAgent,
-        DataCollectionAgent,
-        EvaluationAgent,
-        PPOAgent,
-    )
+    """All 5 agents should be importable from their respective modules."""
+    from src.agents.causal_agent import CausalAnalysisAgent
+    from src.agents.collection_agent import DataCollectionAgent
+    from src.agents.eval_agent import EvaluationAgent
+    from src.agents.ppo_agent import PPOAgent
+    from src.agents.training_agent import BehaviorCloningAgent
     assert DataCollectionAgent is not None
     assert BehaviorCloningAgent is not None
     assert PPOAgent is not None

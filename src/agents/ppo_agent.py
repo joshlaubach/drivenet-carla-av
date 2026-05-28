@@ -40,8 +40,6 @@ import json
 import logging
 import math
 import random
-import socket
-import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -52,7 +50,7 @@ import torch
 import torch.optim as optim
 
 from src.carla_env import CarlaEnv
-from src.carla_utils import make_weather
+from src.carla_utils import kill_carla, launch_carla, make_weather, wait_for_carla
 from src.config import load_config, require_keys
 from src.ppo import (
     ActorCritic,
@@ -321,9 +319,10 @@ class PPOAgent:
         ep_lengths: list[float] = []
 
         prev_speed_kmh = 0.0
-        prev_prev_speed_kmh = -1.0
+        prev_prev_speed_kmh = 0.0
         prev_lane_id = -1
         prev_steer = 0.0
+        first_step = True
 
         for _ in range(cfg["n_steps"]):
             img_t, state_t = self._preprocess_obs(obs)
@@ -331,7 +330,7 @@ class PPOAgent:
             state_t = state_t.to(self.device)
 
             with torch.no_grad():
-                action, log_prob, _, value = model.get_action_and_value(
+                action, log_prob, _, value, z = model.get_action_and_value(
                     img_t, state_t, style_t
                 )
 
@@ -359,17 +358,20 @@ class PPOAgent:
                 dt=1.0 / 20.0,
                 steer=current_steer,
                 prev_steer=prev_steer,
+                first_step=first_step,
             )
 
             prev_prev_speed_kmh = prev_speed_kmh
             prev_speed_kmh = speed_kmh
             prev_lane_id = lane_id
             prev_steer = current_steer
+            first_step = False
 
             self._buffer.add(
                 img_t.cpu(), state_t.cpu(),
                 self.style_token,
                 action.cpu(),
+                z.cpu(),
                 log_prob.cpu().item(),
                 reward,
                 value.cpu().item(),
@@ -385,9 +387,10 @@ class PPOAgent:
                 ep_reward = 0.0
                 ep_length = 0
                 prev_speed_kmh = 0.0
-                prev_prev_speed_kmh = -1.0
+                prev_prev_speed_kmh = 0.0
                 prev_lane_id = -1
                 prev_steer = 0.0
+                first_step = True
                 obs, _ = env.reset()
             else:
                 obs = next_obs
@@ -524,84 +527,14 @@ class PPOAgent:
 
     # -- CARLA lifecycle -------------------------------------------------------
 
-    def _launch_carla(self) -> subprocess.Popen:
-        """Launch a fresh CARLA server process in the background.
+    def _launch_carla(self):
+        return launch_carla(self.carla_exe)
 
-        Map loading happens afterward through CarlaEnv -- CARLA ignores
-        CLI map arguments on this hardware.
-        """
-        if not self.carla_exe.exists():
-            raise FileNotFoundError(
-                f"CARLA executable not found: {self.carla_exe}. "
-                "Set carla_exe= in __init__ or place CARLA at CARLA_0.9.16/."
-            )
-        cmd = [
-            str(self.carla_exe),
-            "-dx12", "-quality-level=Low", "-fps=20",
-            "-benchmark", "-windowed", "-ResX=800", "-ResY=600",
-            "-nosound", "-NoSplash",
-        ]
-        import os
-        env_vars = dict(os.environ)
-        env_vars["DXGI_GPU_PREFERENCE"] = "2"
-        proc = subprocess.Popen(
-            cmd,
-            env=env_vars,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        log.info("CARLA process started (PID %d).", proc.pid)
-        return proc
+    def _wait_for_carla(self, max_wait: float = 60.0, poll_interval: float = 3.0) -> None:
+        wait_for_carla(self.host, self.port, max_wait=max_wait, poll_interval=poll_interval)
 
-    def _wait_for_carla(
-        self,
-        max_wait: float = 60.0,
-        poll_interval: float = 3.0,
-    ) -> None:
-        """Block until CARLA accepts TCP connections on self.port."""
-        deadline = time.time() + max_wait
-        while time.time() < deadline:
-            try:
-                with socket.create_connection((self.host, self.port), timeout=2.0):
-                    log.info("CARLA is reachable.")
-                    time.sleep(15.0)
-                    return
-            except (ConnectionRefusedError, OSError):
-                time.sleep(poll_interval)
-        raise TimeoutError(
-            f"CARLA did not become reachable on {self.host}:{self.port} "
-            f"within {max_wait:.0f}s."
-        )
-
-    def _kill_carla(self, proc: subprocess.Popen | None = None) -> None:
-        """Terminate the CARLA process and any stray instances.
-
-        Uses PowerShell Stop-Process which reliably kills CarlaUE4-Win64-
-        Shipping.exe on Windows. taskkill /F /IM silently fails on this
-        process (possibly due to DX12 handle protection), leaving a zombie
-        that DX12-conflicts with the next CARLA launch.
-        """
-        if proc is not None:
-            try:
-                proc.terminate()
-                proc.wait(timeout=10)
-            except (subprocess.TimeoutExpired, OSError):
-                proc.kill()
-            log.info("Terminated CARLA PID %d.", proc.pid)
-        # PowerShell Stop-Process is more reliable than taskkill /IM on RTX 5080.
-        try:
-            subprocess.run(
-                [
-                    "powershell", "-NonInteractive", "-Command",
-                    "Get-Process -Name 'CarlaUE4*' -ErrorAction SilentlyContinue"
-                    " | Stop-Process -Force -ErrorAction SilentlyContinue",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=15,
-            )
-        except Exception:
-            pass
+    def _kill_carla(self, proc=None) -> None:
+        kill_carla(proc)
 
     # -- Resume checkpoint -----------------------------------------------------
 

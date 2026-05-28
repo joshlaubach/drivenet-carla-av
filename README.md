@@ -318,7 +318,7 @@ Every violation is reported in `info["road_rule_monitor"]` each step.
 
 $$r_\text{shaped} = r_\text{base} + w_v\cdot\frac{v}{40} - w_J\cdot\frac{J}{1000} - w_\delta\cdot\frac{|\dot{\delta}|}{10} - w_\ell\cdot\mathbb{1}[\text{lane change}]$$
 
-where $J = \dfrac{|\ddot{v}_t - \ddot{v}_{t-1}|}{\Delta t}$ is jerk and $|\dot{\delta}|$ is steering rate. Weights come from `configs/ppo.yaml`:
+where $J = \dfrac{|\dot{v}_t - \dot{v}_{t-1}|}{\Delta t}$ is jerk and $|\dot{\delta}|$ is steering rate. Weights come from `configs/ppo.yaml`:
 
 | Style | $w_v$ | $w_J$ | $w_\delta$ | $w_\ell$ |
 |-------|-------|-------|-----------|---------|

@@ -46,6 +46,7 @@ def compute_style_reward(
     dt: float = 0.05,
     steer: float = 0.0,
     prev_steer: float = 0.0,
+    first_step: bool = False,
 ) -> float:
     """Apply style-dependent jerk, speed, lane-change, and steering terms.
 
@@ -57,14 +58,15 @@ def compute_style_reward(
         Three consecutive ego speed readings used to compute jerk.
     lane_id, prev_lane_id : int
         Current and previous CARLA waypoint lane IDs.
-        Pass -1 as a sentinel for the first step of an episode.
     style_weights : dict
         Keys: jerk_penalty, speed_bonus, lane_change_penalty, steering_penalty.
     dt : float
         Simulation timestep in seconds (default 0.05 = 20 FPS).
     steer, prev_steer : float
-        Current and previous steer actions in [-1, 1], used to compute
-        abrupt steering rate (Tier 3 comfort penalty).
+        Current and previous steer actions in [-1, 1].
+    first_step : bool
+        True on the first step of an episode. Skips jerk, steer-rate, and
+        lane-change penalties which require valid history to be meaningful.
 
     Returns
     -------
@@ -75,7 +77,7 @@ def compute_style_reward(
 
     reward += (speed_kmh / SPEED_BONUS_REF_KMH) * style_weights["speed_bonus"]
 
-    if prev_lane_id != -1 and prev_prev_speed_kmh >= 0.0:
+    if not first_step:
         accel_now = (speed_kmh - prev_speed_kmh) / dt
         accel_prev = (prev_speed_kmh - prev_prev_speed_kmh) / dt
         jerk = abs(accel_now - accel_prev) / dt
@@ -84,8 +86,8 @@ def compute_style_reward(
         steer_rate = abs(steer - prev_steer) / dt
         reward -= (steer_rate / STEER_NORM_FACTOR) * style_weights.get("steering_penalty", 1.0)
 
-    if prev_lane_id != -1 and lane_id != prev_lane_id:
-        reward -= style_weights["lane_change_penalty"]
+        if lane_id != prev_lane_id:
+            reward -= style_weights["lane_change_penalty"]
 
     return reward
 
@@ -192,15 +194,21 @@ class ActorCritic(nn.Module):
         state: torch.Tensor,
         style: torch.Tensor,
         action: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Sample an action (or evaluate a given action) and return
-        (action, log_prob, entropy, value)."""
+        z: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Sample or evaluate an action. Returns (action, log_prob, entropy, value, z).
+
+        Pass z (pre-squash latent) at PPO update time to avoid numerical drift
+        from re-inverting squashed actions via atanh/logit.
+        """
         x = self._feats(image, state, style)
         raw = self.actor_head(x)
         std = torch.exp(self.log_std.clamp(-3.0, 1.0))
         dist = Normal(raw, std)
 
-        if action is None:
+        if z is not None:
+            pass  # use provided latent directly — no inversion needed
+        elif action is None:
             z = dist.rsample()
         else:
             eps = 1e-6
@@ -226,7 +234,7 @@ class ActorCritic(nn.Module):
 
         entropy = dist.entropy().sum(dim=1)
         value = self.critic_head(x).squeeze(-1)
-        return act, log_prob, entropy, value
+        return act, log_prob, entropy, value, z
 
 
 # ---------------------------------------------------------------------------
@@ -334,13 +342,16 @@ class MultiCamActorCritic(nn.Module):
         state: torch.Tensor,
         style: torch.Tensor,
         action: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        z: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         x = self._feats(images, state, style)
         raw = self.actor_head(x)
         std = torch.exp(self.log_std.clamp(-3.0, 1.0))
         dist = Normal(raw, std)
 
-        if action is None:
+        if z is not None:
+            pass
+        elif action is None:
             z = dist.rsample()
         else:
             eps = 1e-6
@@ -365,7 +376,7 @@ class MultiCamActorCritic(nn.Module):
         log_prob = lp.sum(dim=1)
         entropy = dist.entropy().sum(dim=1)
         value = self.critic_head(x).squeeze(-1)
-        return act, log_prob, entropy, value
+        return act, log_prob, entropy, value, z
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +401,7 @@ class RolloutBuffer:
         self.obs_states = torch.zeros(n_steps, *obs_shape_state)
         self.styles = torch.zeros(n_steps, dtype=torch.long)
         self.actions = torch.zeros(n_steps, action_dim)
+        self.z_actions = torch.zeros(n_steps, action_dim)  # pre-squash latents
         self.log_probs = torch.zeros(n_steps)
         self.rewards = torch.zeros(n_steps)
         self.values = torch.zeros(n_steps)
@@ -406,6 +418,7 @@ class RolloutBuffer:
         obs_state: torch.Tensor,
         style: int,
         action: torch.Tensor,
+        z: torch.Tensor,
         log_prob: float,
         reward: float,
         value: float,
@@ -415,6 +428,7 @@ class RolloutBuffer:
         self.obs_states[self.ptr] = obs_state.squeeze(0)
         self.styles[self.ptr] = style
         self.actions[self.ptr] = action.squeeze(0)
+        self.z_actions[self.ptr] = z.squeeze(0)
         self.log_probs[self.ptr] = log_prob
         self.rewards[self.ptr] = reward
         self.values[self.ptr] = value
@@ -462,6 +476,7 @@ class RolloutBuffer:
                 self.obs_states[idx],
                 self.styles[idx],
                 self.actions[idx],
+                self.z_actions[idx],
                 self.log_probs[idx],
                 adv[idx],
                 self.returns[idx],
@@ -502,19 +517,20 @@ def ppo_update(
     use_amp = scaler is not None
 
     for _ in range(n_epochs):
-        for (img_b, state_b, style_b, act_b,
+        for (img_b, state_b, style_b, act_b, z_b,
              old_lp_b, adv_b, ret_b) in buffer.get_batches(batch_size):
             img_b = img_b.to(device)
             state_b = state_b.to(device)
             style_b = style_b.to(device)
             act_b = act_b.to(device)
+            z_b = z_b.to(device)
             old_lp_b = old_lp_b.to(device)
             adv_b = adv_b.to(device)
             ret_b = ret_b.to(device)
 
             with torch.amp.autocast("cuda", enabled=use_amp):
-                _, new_lp, entropy, new_value = model.get_action_and_value(
-                    img_b, state_b, style_b, action=act_b,
+                _, new_lp, entropy, new_value, _ = model.get_action_and_value(
+                    img_b, state_b, style_b, z=z_b,
                 )
                 ratio = torch.exp(new_lp - old_lp_b)
                 surr1 = ratio * adv_b

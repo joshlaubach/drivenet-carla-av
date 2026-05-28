@@ -38,6 +38,27 @@ from src.training import evaluate, train_model
 
 log = logging.getLogger(__name__)
 
+# Maps sensor_suite → (npz_key, preprocess_fn).
+# preprocess_fn signature: (raw: np.ndarray) -> np.ndarray
+def _preprocess_single(raw: np.ndarray) -> np.ndarray:
+    return crop_and_resize(raw)
+
+def _preprocess_multi(raw: np.ndarray) -> np.ndarray:
+    n_frames, n_cams = raw.shape[0], raw.shape[1]
+    out = np.empty((n_frames, n_cams, RESIZE_H, RESIZE_W, 3), dtype=np.uint8)
+    for cam in range(n_cams):
+        out[:, cam] = crop_and_resize(raw[:, cam])
+    return out
+
+def _preprocess_lidar(raw: np.ndarray) -> np.ndarray:
+    return raw  # BEV is already at model resolution
+
+_SUITE_LOADER: dict[str, tuple[str, object]] = {
+    "single_cam": ("images",       _preprocess_single),
+    "multi_cam":  ("images_multi", _preprocess_multi),
+    "lidar":      ("bev",          _preprocess_lidar),
+}
+
 
 class BehaviorCloningAgent:
     """Trains a BC model on all collected conditions for one sensor suite.
@@ -101,6 +122,10 @@ class BehaviorCloningAgent:
 
         log.info("Loaded %d frames.", raw["images"].shape[0])
         images = raw["images"]  # shape varies by suite; always stored under "images"
+        # States are passed raw (5-D) to DrivingDataset, which normalises them
+        # internally to the 6-D format expected by DriveNet.  Do NOT call
+        # normalize_states() here -- it would double-normalise and corrupt the
+        # heading, speed, and lane-count features before the dataset sees them.
         meta = encode_metadata(
             raw,
             cfg["weather_codes"],
@@ -123,11 +148,14 @@ class BehaviorCloningAgent:
         test_ds  = DrivingDataset(images, raw["states"], raw["actions"], meta, test_idx)
 
         train_loader = DataLoader(train_ds, batch_size=cfg["batch_size"],
-                                  shuffle=True,  num_workers=0, pin_memory=True)
+                                  shuffle=True,  num_workers=4, pin_memory=True,
+                                  persistent_workers=True)
         val_loader   = DataLoader(val_ds,   batch_size=cfg["batch_size"],
-                                  shuffle=False, num_workers=0, pin_memory=True)
+                                  shuffle=False, num_workers=2, pin_memory=True,
+                                  persistent_workers=True)
         test_loader  = DataLoader(test_ds,  batch_size=cfg["batch_size"],
-                                  shuffle=False, num_workers=0, pin_memory=True)
+                                  shuffle=False, num_workers=2, pin_memory=True,
+                                  persistent_workers=True)
 
         model = self._build_model().to(self.device)
         optimizer = torch.optim.Adam(
@@ -218,36 +246,21 @@ class BehaviorCloningAgent:
                 "Run DataCollectionAgent first."
             )
 
-        if self.sensor_suite == "single_cam":
-            payload_key = "images"
-        elif self.sensor_suite == "multi_cam":
-            payload_key = "images_multi"
-        else:  # lidar
-            payload_key = "bev"
+        payload_key, preprocess_fn = _SUITE_LOADER[self.sensor_suite]
 
         image_parts: list[np.ndarray] = []
         other_parts: dict[str, list[np.ndarray]] = {}
         for path in chunk_files:
-            with np.load(path, allow_pickle=True) as chunk:
-                raw_imgs = chunk[payload_key]
-                if self.sensor_suite == "single_cam":
-                    processed = crop_and_resize(raw_imgs)
-                elif self.sensor_suite == "multi_cam":
-                    # raw_imgs: (N, 3, H, W, 3) — crop/resize each view independently
-                    n_frames, n_cams = raw_imgs.shape[0], raw_imgs.shape[1]
-                    processed = np.empty(
-                        (n_frames, n_cams, RESIZE_H, RESIZE_W, 3), dtype=np.uint8
-                    )
-                    for cam in range(n_cams):
-                        processed[:, cam] = crop_and_resize(raw_imgs[:, cam])
-                else:  # lidar — BEV is already at model resolution, pass through
-                    processed = raw_imgs
-
-                image_parts.append(processed)
-                for key in chunk.files:
-                    if key != payload_key:
-                        other_parts.setdefault(key, []).append(chunk[key])
-            log.debug("Preprocessed %s (%d frames).", path.name, len(image_parts[-1]))
+            try:
+                with np.load(path, allow_pickle=True) as chunk:
+                    processed = preprocess_fn(chunk[payload_key])
+                    image_parts.append(processed)
+                    for key in chunk.files:
+                        if key != payload_key:
+                            other_parts.setdefault(key, []).append(chunk[key])
+                log.debug("Preprocessed %s (%d frames).", path.name, len(image_parts[-1]))
+            except Exception as exc:
+                log.warning("Skipping corrupt chunk %s: %s", path, exc)
 
         result = {"images": np.concatenate(image_parts, axis=0)}
         result.update({k: np.concatenate(v, axis=0) for k, v in other_parts.items()})
