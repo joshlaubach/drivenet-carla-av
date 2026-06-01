@@ -18,10 +18,6 @@ from src.preprocessing import RESIZE_H, RESIZE_W
 
 log = logging.getLogger(__name__)
 
-# Reference cruise speed used to normalize the speed bonus to roughly [0, 1]
-# under typical urban driving. Matches CARLA's default urban speed limit.
-SPEED_BONUS_REF_KMH: float = 40.0
-
 # Empirical jerk scale: a moderate-jerk trajectory produces a penalty of
 # roughly 1.0 at this normalization factor.
 JERK_NORM_FACTOR: float = 1000.0
