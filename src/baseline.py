@@ -1,6 +1,6 @@
 """PID-based rule-following baseline policy for evaluation benchmarking.
 
-Acts as a floor in sensor suite comparisons — every metric should beat this.
+Acts as a floor in sensor suite comparisons -- every metric should beat this.
 No neural network. Uses a pure proportional controller for steering and speed.
 
 Waypoint following requires the vehicle's current position. Callers pass

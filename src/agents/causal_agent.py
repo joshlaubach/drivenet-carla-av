@@ -217,7 +217,7 @@ class CausalAnalysisAgent:
         pscore_control = pscore[T == 0]
 
         # Optimal 1:1 matching without replacement via linear sum assignment.
-        # Cost matrix: |pscore_treated[i] - pscore_control[j]| — shape (n_t, n_c).
+        # Cost matrix: |pscore_treated[i] - pscore_control[j]| -- shape (n_t, n_c).
         # linear_sum_assignment minimises total cost, selecting at most min(n_t, n_c) pairs.
         cost = np.abs(pscore_treated[:, None] - pscore_control[None, :])
         row_ind, col_ind = linear_sum_assignment(cost)
@@ -313,7 +313,7 @@ class CausalAnalysisAgent:
         control_suite: str,
         name: str,
     ) -> dict[str, Any] | None:
-        """Compute DiD = (PPO_treated − BC_treated) − (PPO_control − BC_control).
+        """Compute DiD = (PPO_treated - BC_treated) - (PPO_control - BC_control).
 
         Pre-period = BC model output; post-period = PPO model output.
         No PSM needed: suite assignment is fixed by design, so the DiD

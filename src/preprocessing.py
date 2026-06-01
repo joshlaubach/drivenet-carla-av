@@ -45,12 +45,12 @@ def preprocess_obs(obs: dict[str, np.ndarray]) -> tuple[torch.Tensor, torch.Tens
     Parameters
     ----------
     obs : dict
-        Keys ``"camera"`` (H, W, 3 uint8) and ``"state"`` (3,) float32.
+        Keys ``"camera"`` (H, W, 3 uint8) and ``"state"`` (6,) float32.
 
     Returns
     -------
     img_t : Tensor, shape (1, 3, RESIZE_H, RESIZE_W)
-    state_t : Tensor, shape (1, 3)
+    state_t : Tensor, shape (1, 6)
     """
     img = obs["camera"][CROP_TOP:CROP_BOTTOM, :, :]
     img = cv2.resize(img, (RESIZE_W, RESIZE_H), interpolation=cv2.INTER_AREA)

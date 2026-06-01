@@ -631,7 +631,7 @@ class EvaluationAgent:
             results.append((bc_spec, model))
             log.info("Loaded BC model from %s.", path.name)
 
-        # PID baseline policy (runs once per sensor suite — re-run per suite is intentional)
+        # PID baseline policy (runs once per sensor suite -- re-run per suite is intentional)
         baseline = PIDBaselinePolicy(target_speed_kmh=30.0, lookahead_m=5.0, kp_steer=0.5)
         baseline_spec = {
             "name": f"pid_baseline_{self.sensor_suite}",
@@ -706,7 +706,7 @@ class EvaluationAgent:
         """Return set of towns that have a full set of records in *records*.
 
         A town is complete when every (model, weather, episode) combination has
-        been recorded: len(models) × len(eval_weathers) × episodes_per_condition.
+        been recorded: len(models) x len(eval_weathers) x episodes_per_condition.
         """
         expected = (
             len(models)
@@ -744,7 +744,7 @@ class EvaluationAgent:
             return
 
         summary: dict[str, Any] = {}
-        # Exclude baseline records — significance tests compare sensor suites only
+        # Exclude baseline records -- significance tests compare sensor suites only
         model_records = [r for r in records if r.get("model_type") != "baseline"]
         suites = list({r["sensor_suite"] for r in model_records})
         for i, s1 in enumerate(suites):

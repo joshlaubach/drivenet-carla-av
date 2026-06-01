@@ -12,12 +12,12 @@ LiDAR BEV encoding
 Raw point cloud (x, y, z, intensity) is projected onto a 256x256 grid
 covering 50 m in each horizontal direction (resolution ~0.39 m/cell).
 Points are binned into 5 height slices plus an intensity channel:
-  ch 0 – occupancy z in [-2.0, 0.0)
-  ch 1 – occupancy z in [ 0.0, 0.5)
-  ch 2 – occupancy z in [ 0.5, 1.5)
-  ch 3 – occupancy z in [ 1.5, 3.0)
-  ch 4 – occupancy z in [ 3.0, ∞)
-  ch 5 – mean normalised intensity per cell (0 if no points)
+  ch 0 - occupancy z in [-2.0, 0.0)
+  ch 1 - occupancy z in [ 0.0, 0.5)
+  ch 2 - occupancy z in [ 0.5, 1.5)
+  ch 3 - occupancy z in [ 1.5, 3.0)
+  ch 4 - occupancy z in [ 3.0, inf)
+  ch 5 - mean normalised intensity per cell (0 if no points)
 
 Output shape: float32 (6, 256, 256), values in [0, 1].
 """
@@ -43,7 +43,7 @@ _IMAGE_H = 300
 _FOV = 90
 
 _BEV_GRID = 256          # cells per side
-_BEV_RANGE = 50.0        # metres — grid covers [-50, 50] in x and y
+_BEV_RANGE = 50.0        # metres -- grid covers [-50, 50] in x and y
 _BEV_RES = 2 * _BEV_RANGE / _BEV_GRID   # metres per cell (~0.39)
 
 _HEIGHT_BINS = [-2.0, 0.0, 0.5, 1.5, 3.0]  # lower edges; last bin is open
@@ -57,7 +57,7 @@ _CAM_NAMES = ["front", "front_left", "front_right", "rear"]
 
 # Camera transforms relative to ego vehicle (x forward, y left, z up)
 _CAM_TRANSFORMS: dict[str, tuple[float, float, float, float]] = {
-    #             x     y     z    yaw(°)
+    #             x     y     z    yaw( deg)
     "front":       ( 1.5,  0.0,  2.4,   0),
     "front_left":  ( 1.5,  0.0,  2.4, -45),
     "front_right": ( 1.5,  0.0,  2.4,  45),
@@ -96,7 +96,7 @@ def _points_to_bev(raw_data: bytes) -> np.ndarray:
     intensity_sum = np.zeros((_BEV_GRID, _BEV_GRID), dtype=np.float32)
     intensity_cnt = np.zeros((_BEV_GRID, _BEV_GRID), dtype=np.int32)
 
-    # Grid indices: origin at centre, x→row (forward), y→col (right)
+    # Grid indices: origin at centre, x->row (forward), y->col (right)
     row = np.floor((_BEV_RANGE - px) / _BEV_RES).astype(np.int32)
     col = np.floor((py + _BEV_RANGE) / _BEV_RES).astype(np.int32)
 

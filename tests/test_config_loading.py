@@ -46,12 +46,14 @@ def test_ppo_required_keys() -> None:
     cfg = load_config("ppo")
     require_keys(
         cfg,
-        ["seed", "dropout", "cam_w", "cam_h", "lr", "clip_eps",
-         "entropy_coef", "value_loss_coef", "n_steps", "batch_size",
+        ["training_towns", "style_codes", "seed", "dropout",
+         "cam_w", "cam_h", "lr", "clip_eps",
+         "entropy_coef", "value_loss_coef", "n_steps",
+         "max_steps_per_episode", "batch_size",
          "n_epochs_ppo", "gamma", "gae_lambda", "total_timesteps",
-         "curriculum_min_steps", "max_grad_norm", "crop_top",
-         "crop_bottom", "weather_phase1", "weather_phase2",
-         "reward_profiles"],
+         "curriculum_min_steps", "curriculum_perf_threshold",
+         "max_grad_norm", "crop_top", "crop_bottom",
+         "weather_phase1", "weather_phase2", "reward_profiles"],
         "ppo",
     )
 
@@ -60,9 +62,9 @@ def test_eval_required_keys() -> None:
     cfg = load_config("eval")
     require_keys(
         cfg,
-        ["eval_weathers", "episodes_per_condition",
-         "max_steps_per_episode", "grp_sampling", "bc_model_specs",
-         "meta_dims", "crop"],
+        ["eval_towns", "sensor_suites", "eval_weathers",
+         "episodes_per_condition", "max_steps_per_episode",
+         "grp_sampling", "bc_model_specs", "meta_dims", "crop"],
         "eval",
     )
 
@@ -103,6 +105,6 @@ def test_ppo_reward_profiles() -> None:
     profiles = cfg["reward_profiles"]
     for style in ["chill", "standard", "hurry"]:
         assert style in profiles, f"Missing style '{style}' in reward_profiles"
-        for key in ["jerk_penalty", "speed_bonus", "lane_change_penalty"]:
+        for key in ["jerk_penalty", "speed_bonus", "lane_change_penalty", "steering_penalty"]:
             assert key in profiles[style], f"Missing '{key}' in {style} profile"
             assert isinstance(profiles[style][key], (int, float))

@@ -76,10 +76,10 @@ class DrivingDataset(Dataset):
             is_uint8 = img.dtype == np.uint8
             img = torch.from_numpy(img.copy())
         if img.ndim == 3:
-            # single_cam / lidar: (H, W, C) → (C, H, W)
+            # single_cam / lidar: (H, W, C) -> (C, H, W)
             img = img.permute(2, 0, 1).float()
         else:
-            # multi_cam: (n_cam, H, W, C) → (n_cam, C, H, W)
+            # multi_cam: (n_cam, H, W, C) -> (n_cam, C, H, W)
             img = img.permute(0, 3, 1, 2).float()
         if is_uint8:
             img = img / 255.0
@@ -148,7 +148,7 @@ class GPUAugmenter:
         )  # (N,)
 
         if is_multicam:
-            # Broadcast (N,) → (N, 1, 1, 1, 1) to flip all cameras together
+            # Broadcast (N,) -> (N, 1, 1, 1, 1) to flip all cameras together
             flip_mask = flip_per_sample.view(n, 1, 1, 1, 1)
             images = torch.where(flip_mask, images.flip(-1), images)
             # Reshape to 4-D for ColorJitter / noise / erasing

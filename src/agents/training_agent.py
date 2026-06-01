@@ -38,7 +38,7 @@ from src.training import evaluate, train_model
 
 log = logging.getLogger(__name__)
 
-# Maps sensor_suite → (npz_key, preprocess_fn).
+# Maps sensor_suite -> (npz_key, preprocess_fn).
 # preprocess_fn signature: (raw: np.ndarray) -> np.ndarray
 def _preprocess_single(raw: np.ndarray) -> np.ndarray:
     return crop_and_resize(raw)
@@ -234,9 +234,9 @@ class BehaviorCloningAgent:
         """Load, preprocess, and concatenate all chunk NPZ files.
 
         Payload key and preprocessing are selected by sensor suite:
-          single_cam  — key "images"       (N,H,W,3 uint8);  crop/resize each frame
-          multi_cam   — key "images_multi" (N,3,H,W,3 uint8); crop/resize each of 3 views
-          lidar       — key "bev"          (N,100,200,3 float32); already at model res, no-op
+          single_cam  -- key "images"       (N,H,W,3 uint8);  crop/resize each frame
+          multi_cam   -- key "images_multi" (N,3,H,W,3 uint8); crop/resize each of 3 views
+          lidar       -- key "bev"          (N,100,200,3 float32); already at model res, no-op
         Result is always stored under "images" for uniform downstream access.
         """
         chunk_files = sorted(self.data_dir.rglob("chunk_*.npz"))

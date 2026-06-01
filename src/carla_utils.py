@@ -88,7 +88,7 @@ def wait_for_carla(
 def kill_carla(proc: subprocess.Popen | None = None) -> None:
     """Terminate a CARLA process and sweep any stray CarlaUE4 instances.
 
-    Uses PowerShell Stop-Process rather than taskkill /F /IM — the latter
+    Uses PowerShell Stop-Process rather than taskkill /F /IM -- the latter
     silently fails on DX12-protected handles and leaves zombies that conflict
     with the next CARLA launch on RTX 5080 Blackwell.
     """

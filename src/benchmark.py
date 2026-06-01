@@ -1,16 +1,16 @@
-"""BenchmarkReport — publication-quality analysis of eval_results.json.
+"""BenchmarkReport -- publication-quality analysis of eval_results.json.
 
 Reads eval_results.json and produces three figures:
-1. report_card()       — sensor suite × 5 metrics grouped bar chart (95% bootstrap CIs)
-2. failure_taxonomy()  — violation type × sensor suite heat map
-3. scenario_coverage() — town × weather × sensor suite coverage matrix
+1. report_card()       -- sensor suite x 5 metrics grouped bar chart (95% bootstrap CIs)
+2. failure_taxonomy()  -- violation type x sensor suite heat map
+3. scenario_coverage() -- town x weather x sensor suite coverage matrix
 
 No CARLA dependency. All methods accept an optional output_dir; if given,
 figures are saved as PNG (300 DPI) and PDF.
 
 CARLA Leaderboard Infraction Score multipliers (D8 decision):
-    IS = 0.70^red_light × 0.70^off_road × 0.70^wrong_way × 0.65^double_solid
-    Driving Score = route_completion × IS
+    IS = 0.70^red_light x 0.70^off_road x 0.70^wrong_way x 0.65^double_solid
+    Driving Score = route_completion x IS
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ _COLOR_BLIND_PALETTE = [
 
 
 def _driving_score(record: dict[str, Any]) -> float:
-    """CARLA Leaderboard Driving Score = route_completion × infraction_score."""
+    """CARLA Leaderboard Driving Score = route_completion x infraction_score."""
     is_score = 1.0
     for field, mult in _IS_MULTIPLIERS.items():
         count = int(record.get(field, 0))
@@ -164,7 +164,7 @@ class BenchmarkReport:
     # -- Public API -------------------------------------------------------------
 
     def report_card(self, output_dir: str | Path | None = None) -> plt.Figure:
-        """Sensor suite × 5 metrics grouped bar chart with 95% bootstrap CIs."""
+        """Sensor suite x 5 metrics grouped bar chart with 95% bootstrap CIs."""
         metric_extractors = {
             "Driving Score": _driving_score,
             "Safety Score": _safety_score,
@@ -223,7 +223,7 @@ class BenchmarkReport:
         return fig
 
     def failure_taxonomy(self, output_dir: str | Path | None = None) -> plt.Figure:
-        """Violation type × sensor suite heat map (mean violations per episode)."""
+        """Violation type x sensor suite heat map (mean violations per episode)."""
         groups = self._suite_records()
         suites = sorted(groups.keys())
         n_viols = len(_VIOL_FIELDS)
@@ -263,7 +263,7 @@ class BenchmarkReport:
         return fig
 
     def scenario_coverage(self, output_dir: str | Path | None = None) -> plt.Figure:
-        """Town × weather × sensor suite coverage matrix (episode count per cell)."""
+        """Town x weather x sensor suite coverage matrix (episode count per cell)."""
         all_records = self._records
         towns = sorted({r.get("town", "unknown") for r in all_records})
         weathers = sorted({r.get("weather", "unknown") for r in all_records})

@@ -7,18 +7,18 @@ Architecture overview
 ---------------------
 * Four ResNet-18 camera encoders (one per camera) via nn.ModuleDict.
   Each produces a 512-d feature vector after global average pooling.
-* LiDAR BEV CNN encoder: 4 conv layers → AdaptiveAvgPool(4,4) → Linear(256).
-* Fusion trunk: concat [4×512 cam + 256 lidar + 1 speed] → Linear(FUSED_DIM, 512)
-  → LayerNorm → ReLU → Linear(512, 256) → LayerNorm → ReLU.
-* Actor head: Linear(256, 3) → Tanh  →  [steer, throttle_raw, brake_raw] ∈ [-1, 1].
-* Critic head: Linear(256, 1)  →  scalar value estimate for PPO.
+* LiDAR BEV CNN encoder: 4 conv layers -> AdaptiveAvgPool(4,4) -> Linear(256).
+* Fusion trunk: concat [4x512 cam + 256 lidar + 1 speed] -> Linear(FUSED_DIM, 512)
+  -> LayerNorm -> ReLU -> Linear(512, 256) -> LayerNorm -> ReLU.
+* Actor head: Linear(256, 3) -> Tanh  ->  [steer, throttle_raw, brake_raw] in [-1, 1].
+* Critic head: Linear(256, 1)  ->  scalar value estimate for PPO.
 
 Action remapping
 ----------------
 Actor outputs are in [-1, 1].  Use FSDNet.to_carla(raw) to remap:
-  steer        → [-1, 1]  (unchanged)
-  throttle_raw → [0,  1]  ((raw + 1) / 2)
-  brake_raw    → [0,  1]  ((raw + 1) / 2)
+  steer        -> [-1, 1]  (unchanged)
+  throttle_raw -> [0,  1]  ((raw + 1) / 2)
+  brake_raw    -> [0,  1]  ((raw + 1) / 2)
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ _CAM_NAMES = ["front", "front_left", "front_right", "rear"]
 # ---------------------------------------------------------------------------
 
 class _LidarEncoder(nn.Module):
-    """4-layer conv encoder for 6-channel 256×256 BEV input."""
+    """4-layer conv encoder for 6-channel 256x256 BEV input."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -133,7 +133,7 @@ class FSDNet(nn.Module):
 
         Returns
         -------
-        action : (B, 3) float32  — [steer, throttle_raw, brake_raw] ∈ [-1, 1]
+        action : (B, 3) float32  -- [steer, throttle_raw, brake_raw] in [-1, 1]
         value  : (B, 1) float32
         """
         images = {
@@ -162,7 +162,7 @@ class FSDNet(nn.Module):
 
         Parameters
         ----------
-        raw : (B, 3) or (3,) tensor — [steer, throttle_raw, brake_raw]
+        raw : (B, 3) or (3,) tensor -- [steer, throttle_raw, brake_raw]
 
         Returns
         -------

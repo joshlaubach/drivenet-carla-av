@@ -4,10 +4,10 @@ Reads: workflows/03_ppo_finetuning.md
 Sequences: ActorCritic (or MultiCamActorCritic), RolloutBuffer, ppo_update,
            CarlaEnv, and CARLA process management.
 
-Training cycles sequentially through four training towns (Town02, Town04,
-Town06, Town10HD). Each cycle collects one rollout batch per town, then
-updates the model. This lets one generalizing model learn across diverse
-environments rather than specializing to a single town.
+Training towns are configured via configs/ppo.yaml (training_towns key).
+Each cycle collects one rollout batch per town, then updates the model.
+This lets the policy generalize across towns rather than specializing to
+a single map.
 
 The weather curriculum expands from phase 1 (ClearNoon only) to phase 2
 (all six presets) only when BOTH of the following are met:
@@ -215,7 +215,7 @@ class PPOAgent:
                                     model, env, town,
                                 )
                             except RuntimeError as exc:
-                                # CARLA crashed mid-rollout — break inner loop to
+                                # CARLA crashed mid-rollout -- break inner loop to
                                 # relaunch CARLA and resume from current total_steps.
                                 log.error(
                                     "[%s] Rollout failed (%s). Relaunching CARLA.", self.style, exc
@@ -273,7 +273,7 @@ class PPOAgent:
                     time.sleep(20.0)
 
         self._save_results(history)
-        # Delete resume checkpoint — clean completion means no resume needed.
+        # Delete resume checkpoint -- clean completion means no resume needed.
         self._delete_resume()
         return history
 
@@ -338,7 +338,7 @@ class PPOAgent:
             action_np = action.squeeze(0).cpu().numpy()
             next_obs, reward, terminated, truncated, info = env.step(action_np)
             done = terminated or truncated
-            # CarlaEnv never truncates — enforce the episode step limit here,
+            # CarlaEnv never truncates -- enforce the episode step limit here,
             # before the buffer sees the done flag.
             if not done and ep_length + 1 >= cfg["max_steps_per_episode"]:
                 done = True
@@ -407,7 +407,7 @@ class PPOAgent:
 
         # Record any episode that was still in progress at the rollout boundary
         # (env.reset() is called per rollout, so ep_length never reaches the
-        # max_steps_per_episode threshold mid-rollout — capture it here instead).
+        # max_steps_per_episode threshold mid-rollout -- capture it here instead).
         if ep_length > 0:
             ep_rewards.append(ep_reward)
             ep_lengths.append(float(ep_length))

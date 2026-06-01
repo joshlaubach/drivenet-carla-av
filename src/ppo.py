@@ -92,7 +92,7 @@ def compute_style_reward(
         reward -= (jerk / JERK_NORM_FACTOR) * style_weights["jerk_penalty"]
 
         steer_rate = abs(steer - prev_steer) / dt
-        reward -= (steer_rate / STEER_NORM_FACTOR) * style_weights.get("steering_penalty", 1.0)
+        reward -= (steer_rate / STEER_NORM_FACTOR) * style_weights["steering_penalty"]
 
         if lane_id != prev_lane_id:
             reward -= style_weights["lane_change_penalty"]
@@ -215,7 +215,7 @@ class ActorCritic(nn.Module):
         dist = Normal(raw, std)
 
         if z is not None:
-            pass  # use provided latent directly — no inversion needed
+            pass  # use provided latent directly -- no inversion needed
         elif action is None:
             z = dist.rsample()
         else:

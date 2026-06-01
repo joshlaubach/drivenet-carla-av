@@ -1,14 +1,15 @@
-"""DriveNet live collection monitor — Tesla/Waymo-style split-screen display.
+# -*- coding: utf-8 -*-
+"""DriveNet live collection monitor -- Tesla/Waymo-style split-screen display.
 
-Opens a 1280×720 pygame window with five panels:
-  • Front camera       (top-left,     640×480) — primary forward view
-  • Semantic BEV       (top-right,    640×480) — top-down semantic seg, z=30 m
-  • Left A-pillar cam  (bottom-left,  320×240) — −60° coverage
-  • Right A-pillar cam (bottom-center,320×240) — +60° coverage
-  • HUD status         (bottom-right, 640×240) — speed, condition, frames
+Opens a 1280x720 pygame window with five panels:
+  * Front camera        (top-left,      640x480) -- primary forward view
+  * Semantic BEV        (top-right,     640x480) -- top-down semantic seg, z=30 m
+  * Left A-pillar cam   (bottom-left,   320x240) -- -60 deg coverage
+  * Right A-pillar cam  (bottom-center, 320x240) -- +60 deg coverage
+  * HUD status          (bottom-right,  640x240) -- speed, condition, frames
 
 The semantic BEV camera uses CARLA's semantic segmentation sensor mounted
-30 m above the ego looking straight down (pitch=−90°).  Each pixel is
+30 m above the ego looking straight down (pitch=-90 deg).  Each pixel is
 colour-coded by label: road=purple, vehicles=blue, pedestrians=red, etc.
 A white crosshair marks the ego vehicle at the centre of the BEV.
 
@@ -43,13 +44,13 @@ _CAM_TRANSFORMS = [
     carla.Transform(carla.Location(x=1.0, y=-1.0, z=2.4), carla.Rotation(yaw=-60)),
     carla.Transform(carla.Location(x=1.0, y=1.0,  z=2.4), carla.Rotation(yaw=60)),
 ]
-# Semantic BEV: rooftop-high, pitch=-90 = straight down; FOV=90° gives 60 m coverage
+# Semantic BEV: rooftop-high, pitch=-90 = straight down; FOV=90 deg gives 60 m coverage
 _SEM_TRANSFORM = carla.Transform(
     carla.Location(x=0.0, z=30.0),
     carla.Rotation(pitch=-90.0),
 )
 
-# CARLA semantic label → RGB colour (CityScapes palette)
+# CARLA semantic label -> RGB colour (CityScapes palette)
 _SEM_PALETTE = np.zeros((256, 3), dtype=np.uint8)
 _SEM_PALETTE[0]  = (0,   0,   0)    # Unlabeled
 _SEM_PALETTE[1]  = (70,  70,  70)   # Building
@@ -75,7 +76,7 @@ _SEM_PALETTE[20] = (170, 120, 50)   # Dynamic
 _SEM_PALETTE[21] = (45,  60,  150)  # Water
 _SEM_PALETTE[22] = (145, 170, 100)  # Terrain
 
-# Window layout (x, y, w, h)
+# Window layout: (x, y, w, h) for each panel
 _WIN_W, _WIN_H = 1280, 720
 _TOP_H, _BOT_H = 480, 240
 _FRONT_RECT = (0,   0,      640, _TOP_H)
@@ -84,14 +85,16 @@ _LEFT_RECT  = (0,   _TOP_H, 320, _BOT_H)
 _RIGHT_RECT = (320, _TOP_H, 320, _BOT_H)
 _HUD_RECT   = (640, _TOP_H, 640, _BOT_H)
 
-_BG     = (10,  10,  15)
-_BORDER = (40,  40,  50)
-_ACCENT = (0,   200, 255)
-_WHITE  = (255, 255, 255)
-_GRAY   = (80,  80,  90)
-_GREEN  = (0,   200, 80)
-_YELLOW = (230, 200, 0)
-_RED    = (220, 50,  50)
+# Colour palette -- dark instrument theme
+_BG     = (12,  12,  18)   # near-black background
+_BORDER = (35,  35,  48)   # panel borders
+_ACCENT = (0,   210, 255)  # cyan accent (titles, badges)
+_WHITE  = (225, 225, 230)  # soft white (avoids harsh glare)
+_GRAY   = (85,  85, 100)   # secondary / label text
+_DIM    = (40,  40,  52)   # bar track fill
+_GREEN  = (0,   210, 80)
+_YELLOW = (240, 200, 0)
+_RED    = (220, 55,  55)
 
 
 class DriveNetVisualizer:
@@ -104,12 +107,24 @@ class DriveNetVisualizer:
                 "Install it with:  pip install pygame"
             )
         pygame.init()
-        pygame.display.set_caption("DriveNet — Live Collection View")
+        pygame.display.set_caption("DriveNet -- Live Collection View")
         self._screen = pygame.display.set_mode((_WIN_W, _WIN_H))
         self._clock  = pygame.time.Clock()
-        self._font_title = pygame.font.SysFont("monospace", 20, bold=True)
-        self._font_body  = pygame.font.SysFont("monospace", 18)
-        self._font_small = pygame.font.SysFont("monospace", 14)
+
+        # Font selection -- prefer Consolas (Windows), fall back gracefully
+        def _font(size: int, bold: bool = False) -> "pygame.font.Font":
+            for family in ("consolas", "lucidaconsole", "inconsolata", "monospace"):
+                try:
+                    f = pygame.font.SysFont(family, size, bold=bold)
+                    if f is not None:
+                        return f
+                except Exception:
+                    pass
+            return pygame.font.Font(None, size)
+
+        self._font_large = _font(34, bold=True)   # speed readout
+        self._font_body  = _font(14)
+        self._font_small = _font(12)
 
         self._cam_sensors: list[carla.Actor] = []
         self._cam_queues: list[queue.Queue] = [queue.Queue(maxsize=4) for _ in range(3)]
@@ -121,10 +136,10 @@ class DriveNetVisualizer:
 
         self._active = True
         self._tick   = 0
-        self._render_hz  = 0.0
+        self._render_hz   = 0.0
         self._last_render = time.time()
 
-    # ── Sensor lifecycle ────────────────────────────────────────────────────
+    # --- Sensor lifecycle ---------------------------------------------------
 
     def reattach(self, world: carla.World, vehicle: carla.Vehicle) -> None:
         """Detach sensors from the old vehicle and spawn new ones on *vehicle*.
@@ -173,7 +188,7 @@ class DriveNetVisualizer:
             self._sem_sensor = None
         _drain(self._sem_queue)
 
-    # ── Sensor callbacks (Boost.Asio thread — never raise) ──────────────────
+    # --- Sensor callbacks (Boost.Asio thread -- never raise) ----------------
 
     @staticmethod
     def _cb_cam(weak_self, image, cam_index: int) -> None:
@@ -193,7 +208,7 @@ class DriveNetVisualizer:
         except Exception:
             pass
 
-    # ── Frame update ────────────────────────────────────────────────────────
+    # --- Frame update -------------------------------------------------------
 
     def update(self, info: dict[str, Any] | None = None) -> None:
         """Drain queues and redraw window.  Call once per simulation tick."""
@@ -236,7 +251,7 @@ class DriveNetVisualizer:
         except Exception:
             pass  # never let a render error abort collection
 
-    # ── Rendering ───────────────────────────────────────────────────────────
+    # --- Rendering ----------------------------------------------------------
 
     def _render(self, info: dict[str, Any]) -> None:
         self._screen.fill(_BG)
@@ -245,12 +260,13 @@ class DriveNetVisualizer:
         self._draw_frame(self._cam_frames[2], *_RIGHT_RECT)
         self._draw_bev()
         self._draw_hud(info)
+        # Panel borders drawn last so they overlay camera edges cleanly
         for rect in (_FRONT_RECT, _SEM_RECT, _LEFT_RECT, _RIGHT_RECT, _HUD_RECT):
-            pygame.draw.rect(self._screen, _BORDER, rect, 2)
-        self._badge("FRONT  |  60° FOV",  *_FRONT_RECT[:2])
-        self._badge("SEMANTIC BEV  |  60 m radius", *_SEM_RECT[:2])
-        self._badge("LEFT  −60°", *_LEFT_RECT[:2], small=True)
-        self._badge("RIGHT  +60°", *_RIGHT_RECT[:2], small=True)
+            pygame.draw.rect(self._screen, _BORDER, rect, 1)
+        self._badge("front",  *_FRONT_RECT[:2])
+        self._badge("bev",    *_SEM_RECT[:2])
+        self._badge("left",   *_LEFT_RECT[:2],  small=True)
+        self._badge("right",  *_RIGHT_RECT[:2], small=True)
         pygame.display.flip()
         self._clock.tick(30)
 
@@ -260,16 +276,15 @@ class DriveNetVisualizer:
         x: int, y: int, w: int, h: int,
     ) -> None:
         if arr is None:
-            self._screen.blit(
-                self._font_small.render("WAITING...", True, _GRAY), (x + w // 2 - 40, y + h // 2)
-            )
+            lbl = self._font_small.render("waiting...", True, _GRAY)
+            self._screen.blit(lbl, (x + w // 2 - lbl.get_width() // 2, y + h // 2))
             return
         surf = pygame.image.frombuffer(arr.tobytes(), (_CAM_W, _CAM_H), "RGB")
         self._screen.blit(pygame.transform.scale(surf, (w, h)), (x, y))
 
     def _draw_bev(self) -> None:
         x, y, w, h = _SEM_RECT
-        sq = min(w, h)  # 480 — square to preserve aspect
+        sq = min(w, h)  # 480 -- square to preserve aspect ratio
         if self._sem_frame is not None:
             surf = pygame.image.frombuffer(
                 self._sem_frame.tobytes(), (_SEM_W, _SEM_H), "RGB"
@@ -279,93 +294,102 @@ class DriveNetVisualizer:
             self._screen.blit(surf, (ox, y))
             cx, cy = ox + sq // 2, y + sq // 2
             # Ego-vehicle crosshair at BEV centre
-            pygame.draw.circle(self._screen, _WHITE, (cx, cy), 6, 2)
-            pygame.draw.line(self._screen, _WHITE, (cx, cy - 14), (cx, cy + 14), 2)
-            pygame.draw.line(self._screen, _WHITE, (cx - 14, cy), (cx + 14, cy), 2)
+            pygame.draw.circle(self._screen, _WHITE, (cx, cy), 5, 1)
+            pygame.draw.line(self._screen, _WHITE, (cx, cy - 12), (cx, cy + 12), 1)
+            pygame.draw.line(self._screen, _WHITE, (cx - 12, cy), (cx + 12, cy), 1)
 
     def _draw_hud(self, info: dict[str, Any]) -> None:
         x0, y0, w, _ = _HUD_RECT
-        pad, lh = 10, 24
-        x, y = x0 + pad, y0 + pad
+        pad = 14
+        x = x0 + pad
+        y = y0 + pad
 
-        self._screen.blit(
-            self._font_title.render(
-                f"DriveNet  |  {info.get('town', '---')}", True, _ACCENT
-            ), (x, y)
+        # --- context: town / weather / time-of-day / cond ---
+        town    = info.get("town",      "---")
+        weather = info.get("weather",   "---")
+        tod     = info.get("tod",       "---")
+        cond    = info.get("condition", 0)
+        ctx_s = self._font_small.render(
+            f"{town}  {weather}  {tod}  cond {cond}/54", True, _GRAY
         )
-        y += lh + 4
+        self._screen.blit(ctx_s, (x, y))
+        y += ctx_s.get_height() + 5
         self._hline(x0, y, w, pad)
         y += 8
 
+        # --- speed: large centred readout ---
         speed = float(info.get("speed_kmh", 0.0))
-        sc    = _GREEN if speed < 60 else (_YELLOW if speed < 90 else _RED)
+        sc = _GREEN if speed < 60 else (_YELLOW if speed < 90 else _RED)
+
+        spd_s  = self._font_large.render(f"{speed:.1f}", True, sc)
+        unit_s = self._font_body.render("km/h", True, _GRAY)
+        total_w = spd_s.get_width() + 5 + unit_s.get_width()
+        sx = x0 + (w - total_w) // 2
+        self._screen.blit(spd_s,  (sx, y))
+        self._screen.blit(unit_s, (sx + spd_s.get_width() + 5,
+                                   y + spd_s.get_height() - unit_s.get_height() - 1))
+        y += spd_s.get_height() + 5
+        self._bar(x, y, w - pad * 2, 4, speed / 120.0, sc)
+        y += 10
+
+        traffic = str(info.get("traffic", "---"))
         self._screen.blit(
-            self._font_body.render(f"Speed:  {speed:5.1f} km/h", True, sc), (x, y)
+            self._font_small.render(f"traffic: {traffic}", True, _GRAY), (x, y)
         )
-        y += lh
-        self._bar(x, y, w - pad * 2, 8, speed / 120.0, sc)
-        y += 16
+        y += self._font_small.get_height() + 5
         self._hline(x0, y, w, pad)
         y += 8
 
-        cond = info.get("condition", 0)
-        self._screen.blit(
-            self._font_body.render(f"Cond:   {cond:2d} / 54", True, _WHITE), (x, y)
-        )
-        y += lh
-        for label, key in (("Weather", "weather"), ("Time", "tod"), ("Traffic", "traffic")):
-            self._screen.blit(
-                self._font_small.render(f"  {label+':':<10}{info.get(key, '---')}", True, _GRAY),
-                (x, y)
-            )
-            y += lh - 4
-        y += 4
-        self._hline(x0, y, w, pad)
-        y += 8
-
+        # --- frames progress ---
         frames = info.get("frames_saved", 0)
         ftotal = info.get("frames_total", 300)
+        pct    = frames / max(ftotal, 1)
+
+        frm_s = self._font_small.render(f"frames  {frames} / {ftotal}", True, _WHITE)
+        pct_s = self._font_small.render(f"{pct * 100:.0f}%", True, _GRAY)
+        self._screen.blit(frm_s, (x, y))
+        self._screen.blit(pct_s, (x0 + w - pad - pct_s.get_width(), y))
+        y += frm_s.get_height() + 4
+        self._bar(x, y, w - pad * 2, 4, pct, _GREEN)
+        y += 10
+
         chunks = info.get("chunks_saved", 0)
         self._screen.blit(
-            self._font_body.render(f"Frames: {frames:4d} / {ftotal}", True, _WHITE), (x, y)
+            self._font_small.render(f"{chunks} chunks saved", True, _GRAY), (x, y)
         )
-        y += lh
-        self._bar(x, y, w - pad * 2, 8, frames / max(ftotal, 1), _GREEN)
-        y += 16
-        self._screen.blit(
-            self._font_body.render(f"Chunks: {chunks:3d} saved", True, _WHITE), (x, y)
-        )
-        y += lh
+        y += self._font_small.get_height() + 5
         self._hline(x0, y, w, pad)
         y += 8
 
+        # --- render rate ---
         hz_col = _GREEN if self._render_hz >= 4.0 else _YELLOW
+        dot_cx = x + 5
+        dot_cy = y + self._font_small.get_height() // 2
+        pygame.draw.circle(self._screen, hz_col, (dot_cx, dot_cy), 4)
         self._screen.blit(
-            self._font_small.render(
-                f"● COLLECTING   Render: {self._render_hz:.1f} Hz", True, hz_col
-            ),
-            (x, y),
+            self._font_small.render(f"  {self._render_hz:.1f} Hz", True, hz_col),
+            (x + 12, y),
         )
 
     def _bar(self, x: int, y: int, w: int, h: int, frac: float, color: tuple) -> None:
         frac = max(0.0, min(1.0, frac))
-        pygame.draw.rect(self._screen, _GRAY, (x, y, w, h), 1)
-        fill = int((w - 2) * frac)
+        pygame.draw.rect(self._screen, _DIM, (x, y, w, h))
+        fill = int(w * frac)
         if fill > 0:
-            pygame.draw.rect(self._screen, color, (x + 1, y + 1, fill, h - 2))
+            pygame.draw.rect(self._screen, color, (x, y, fill, h))
 
     def _hline(self, x0: int, y: int, w: int, pad: int) -> None:
-        pygame.draw.line(self._screen, _GRAY, (x0 + pad, y), (x0 + w - pad, y), 1)
+        pygame.draw.line(self._screen, _BORDER, (x0 + pad, y), (x0 + w - pad, y), 1)
 
     def _badge(self, text: str, x: int, y: int, *, small: bool = False) -> None:
         font = self._font_small if small else self._font_body
         surf = font.render(text, True, _ACCENT)
-        bg   = pygame.Surface((surf.get_width() + 8, surf.get_height() + 4), pygame.SRCALPHA)
-        bg.fill((0, 0, 0, 160))
+        bg   = pygame.Surface((surf.get_width() + 10, surf.get_height() + 4), pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 140))
         self._screen.blit(bg, (x + 4, y + 4))
-        self._screen.blit(surf, (x + 8, y + 6))
+        self._screen.blit(surf, (x + 9, y + 6))
 
-    # ── Teardown ────────────────────────────────────────────────────────────
+    # --- Teardown -----------------------------------------------------------
 
     def close(self) -> None:
         self._active = False
