@@ -35,11 +35,6 @@ from pathlib import Path
 from queue import Queue
 from typing import Any
 
-# Add CARLA PythonAPI to sys.path so `agents.navigation` (GlobalRoutePlanner) is importable.
-_CARLA_PYTHONAPI = Path(__file__).resolve().parent.parent.parent / "CARLA_0.9.16" / "PythonAPI" / "carla"
-if str(_CARLA_PYTHONAPI) not in sys.path:
-    sys.path.insert(0, str(_CARLA_PYTHONAPI))
-
 import carla
 import cv2
 import numpy as np
@@ -201,6 +196,13 @@ class EvaluationAgent:
                 ))
                 spectator_sensor = self._setup_spectator_camera(env)
                 try:
+                    # Ensure CARLA PythonAPI is on sys.path for agents.navigation.
+                    _carla_api = (
+                        Path(__file__).resolve().parent.parent.parent
+                        / "CARLA_0.9.16" / "PythonAPI" / "carla"
+                    )
+                    if str(_carla_api) not in sys.path:
+                        sys.path.insert(0, str(_carla_api))
                     from agents.navigation.global_route_planner import (
                         GlobalRoutePlanner,
                     )
