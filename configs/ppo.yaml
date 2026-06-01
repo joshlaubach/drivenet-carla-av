@@ -25,6 +25,7 @@ clip_eps: 0.2
 entropy_coef: 0.01
 value_loss_coef: 0.5
 n_steps: 512
+max_steps_per_episode: 2000
 batch_size: 64
 n_epochs_ppo: 4
 gamma: 0.99

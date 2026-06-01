@@ -45,6 +45,15 @@ bc_model_specs:
 
 meta_dims: [6, 3, 3, 3, 3]   # weather, road_type, tod, traffic, style
 
+# Must match bc.yaml — used to build metadata tensor for BC model inference
+weather_codes:
+  ClearNoon: 0
+  CloudyNoon: 1
+  WetNoon: 2
+  HardRainNoon: 3
+  ClearSunset: 4
+  ClearNight: 5
+
 # Driving style integer codes (must match bc.yaml and ppo.yaml)
 style_codes:
   chill: 0

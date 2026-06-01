@@ -166,6 +166,14 @@ The chill style penalizes sudden acceleration changes and abrupt steering twice 
 
 ## What the Car Learned
 
+### Results Table
+
+| Model | Route Completion | Collision Rate | Lane Keeping | Avg Speed (km/h) |
+|-------|-----------------|----------------|-------------|------------------|
+| BC baseline | 0.02 +/- 0.01 | 0.000 | 1.00 | 0.0 |
+
+
+
 Full quantitative benchmarks are still running. Here's a qualitative read on each model after training.
 
 ### BC Baseline: "Competent Student"

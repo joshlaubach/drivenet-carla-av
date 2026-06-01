@@ -93,6 +93,7 @@ class PPOAgent:
             ["seed", "dropout", "cam_w", "cam_h", "lr", "clip_eps",
              "entropy_coef", "value_loss_coef", "n_steps", "batch_size",
              "n_epochs_ppo", "gamma", "gae_lambda", "total_timesteps",
+             "max_steps_per_episode",
              "curriculum_min_steps", "curriculum_perf_threshold",
              "max_grad_norm", "crop_top", "crop_bottom",
              "weather_phase1", "weather_phase2", "reward_profiles",
@@ -184,7 +185,7 @@ class PPOAgent:
                 # Launch ONE CARLA per town and keep it running for ALL rollouts
                 # in that town. Killing and relaunching between every 512-step
                 # rollout causes DX12 memory conflicts on RTX 5080 Blackwell.
-                proc = self._launch_carla()
+                proc = self._launch_carla(town)
                 try:
                     self._wait_for_carla()
                     env = RoadRuleMonitor(CarlaEnv(
@@ -337,6 +338,10 @@ class PPOAgent:
             action_np = action.squeeze(0).cpu().numpy()
             next_obs, reward, terminated, truncated, info = env.step(action_np)
             done = terminated or truncated
+            # CarlaEnv never truncates — enforce the episode step limit here,
+            # before the buffer sees the done flag.
+            if not done and ep_length + 1 >= cfg["max_steps_per_episode"]:
+                done = True
 
             # Style reward shaping
             try:
@@ -399,6 +404,13 @@ class PPOAgent:
                 obs, _ = env.reset()
             else:
                 obs = next_obs
+
+        # Record any episode that was still in progress at the rollout boundary
+        # (env.reset() is called per rollout, so ep_length never reaches the
+        # max_steps_per_episode threshold mid-rollout — capture it here instead).
+        if ep_length > 0:
+            ep_rewards.append(ep_reward)
+            ep_lengths.append(float(ep_length))
 
         # Bootstrap value for GAE
         img_t, state_t = self._preprocess_obs(obs)
@@ -532,10 +544,10 @@ class PPOAgent:
 
     # -- CARLA lifecycle -------------------------------------------------------
 
-    def _launch_carla(self):
-        return launch_carla(self.carla_exe)
+    def _launch_carla(self, town: str | None = None):
+        return launch_carla(self.carla_exe, town=town)
 
-    def _wait_for_carla(self, max_wait: float = 60.0, poll_interval: float = 3.0) -> None:
+    def _wait_for_carla(self, max_wait: float = 120.0, poll_interval: float = 3.0) -> None:
         wait_for_carla(self.host, self.port, max_wait=max_wait, poll_interval=poll_interval)
 
     def _kill_carla(self, proc=None) -> None:

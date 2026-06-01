@@ -28,11 +28,17 @@ import json
 import logging
 import math
 import random
+import sys
 import time
 import weakref
 from pathlib import Path
 from queue import Queue
 from typing import Any
+
+# Add CARLA PythonAPI to sys.path so `agents.navigation` (GlobalRoutePlanner) is importable.
+_CARLA_PYTHONAPI = Path(__file__).resolve().parent.parent.parent / "CARLA_0.9.16" / "PythonAPI" / "carla"
+if str(_CARLA_PYTHONAPI) not in sys.path:
+    sys.path.insert(0, str(_CARLA_PYTHONAPI))
 
 import carla
 import cv2
@@ -56,6 +62,45 @@ log = logging.getLogger(__name__)
 _DRIVING_STYLES = ["chill", "standard", "hurry"]
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_CARLA_EXE = _PROJECT_ROOT / "CARLA_0.9.16" / "CarlaUE4.exe"
+_DEFAULT_ENGINE_INI = _PROJECT_ROOT / "CARLA_0.9.16" / "CarlaUE4" / "Config" / "DefaultEngine.ini"
+_MAP_INI_KEYS = [
+    "EditorStartupMap",
+    "GameDefaultMap",
+    "ServerDefaultMap",
+    "TransitionMap",
+]
+
+
+def _set_default_engine_map(town: str) -> None:
+    """Patch DefaultEngine.ini to boot CARLA on *town* next launch.
+
+    Appends _Opt suffix if absent (CARLA ships only _Opt maps for low-quality).
+    Rewrites the four map fields in [/Script/EngineSettings.GameMapsSettings].
+    """
+    town_opt = town if town.endswith("_Opt") else f"{town}_Opt"
+    map_path = f"/Game/Carla/Maps/{town_opt}.{town_opt}"
+    text = _DEFAULT_ENGINE_INI.read_text(encoding="utf-8")
+    for key in _MAP_INI_KEYS:
+        import re as _re
+        text = _re.sub(rf"^{key}=.*$", f"{key}={map_path}", text, flags=_re.MULTILINE)
+    _DEFAULT_ENGINE_INI.write_text(text, encoding="utf-8")
+
+
+def _bc_meta_tensor(
+    weather: str,
+    weather_codes: dict[str, int],
+    style_code: int = 1,
+    device: str = "cpu",
+) -> "torch.Tensor":
+    """Build a (1, 5) int64 metadata tensor for BC inference.
+
+    Uses the known weather name; defaults road_type=urban(2), tod inferred
+    from weather name, traffic=medium(1), style=standard(1).
+    """
+    w_code = weather_codes.get(weather, 0)
+    tod = 2 if "Night" in weather else (1 if "Sunset" in weather else 0)
+    meta = torch.tensor([[w_code, 2, tod, 1, style_code]], dtype=torch.long)
+    return meta.to(device)
 
 
 class EvaluationAgent:
@@ -82,7 +127,7 @@ class EvaluationAgent:
             self.cfg,
             ["eval_towns", "eval_weathers", "episodes_per_condition",
              "max_steps_per_episode", "grp_sampling", "bc_model_specs",
-             "meta_dims", "crop", "video", "sensor_suites", "style_codes"],
+             "meta_dims", "weather_codes", "crop", "video", "sensor_suites", "style_codes"],
             "eval",
         )
 
@@ -129,16 +174,21 @@ class EvaluationAgent:
                 "Run BehaviorCloningAgent and PPOAgent first."
             )
 
-        all_records: list[dict[str, Any]] = []
+        # Resume: load any town-level records already saved from a prior interrupted run.
+        all_records: list[dict[str, Any]] = self._load_suite_records()
+        completed_towns = self._completed_towns(all_records, models)
 
         for town in self.cfg["eval_towns"]:
+            if town in completed_towns:
+                log.info("Skipping %s/%s — already checkpointed.", self.sensor_suite, town)
+                continue
             log.info(
                 "Evaluating %s in %s (%d models, %d weathers, %d episodes each).",
                 self.sensor_suite, town,
                 len(models), len(self.cfg["eval_weathers"]),
                 self.cfg["episodes_per_condition"],
             )
-            proc = self._launch_carla()
+            proc = self._launch_carla(town=town)
             try:
                 self._wait_for_carla()
                 env = RoadRuleMonitor(CarlaEnv(
@@ -193,6 +243,8 @@ class EvaluationAgent:
             finally:
                 self._kill_carla(proc)
                 time.sleep(20.0)
+            # Checkpoint after each town so --resume can skip completed towns.
+            self._append_results(all_records)
 
         self._append_results(all_records)
         self._run_significance_tests()
@@ -333,7 +385,7 @@ class EvaluationAgent:
             if spec["type"] == "baseline":
                 loc = env.vehicle.get_location()
                 obs["_vehicle_loc"] = (loc.x, loc.y)
-            action = self._get_action(model, spec, obs)
+            action = self._get_action(model, spec, obs, weather=weather)
             obs, _, terminated, truncated, info = env.step(action)
             total_steps += 1
 
@@ -447,6 +499,7 @@ class EvaluationAgent:
         model: Any,
         spec: dict[str, Any],
         obs: dict[str, Any],
+        weather: str = "ClearNoon",
     ) -> np.ndarray:
         """Run one forward pass and return the action as a numpy array."""
         # Baseline policy uses only obs["state"] and obs["_vehicle_loc"]
@@ -485,7 +538,12 @@ class EvaluationAgent:
                 style_t = torch.tensor([style_code], dtype=torch.long, device=self.device)
                 action, _, _, _ = model.get_action_and_value(img_t, state_t, style_t)
             else:
-                action = model(img_t, state_t, meta=None)
+                meta_t = _bc_meta_tensor(
+                    weather,
+                    self.cfg["weather_codes"],
+                    device=str(self.device),
+                )
+                action = model(img_t, state_t, meta=meta_t)
 
         return action.squeeze(0).cpu().numpy()
 
@@ -627,6 +685,36 @@ class EvaluationAgent:
 
     # -- Results persistence ---------------------------------------------------
 
+    def _load_suite_records(self) -> list[dict[str, Any]]:
+        """Return existing records for this sensor_suite from eval_results.json."""
+        if not self.results_path.exists():
+            return []
+        try:
+            with open(self.results_path) as f:
+                all_existing = json.load(f)
+            return [r for r in all_existing if r.get("sensor_suite") == self.sensor_suite]
+        except Exception:
+            return []
+
+    def _completed_towns(
+        self,
+        records: list[dict[str, Any]],
+        models: list,
+    ) -> set[str]:
+        """Return set of towns that have a full set of records in *records*.
+
+        A town is complete when every (model, weather, episode) combination has
+        been recorded: len(models) × len(eval_weathers) × episodes_per_condition.
+        """
+        expected = (
+            len(models)
+            * len(self.cfg["eval_weathers"])
+            * self.cfg["episodes_per_condition"]
+        )
+        from collections import Counter
+        town_counts: Counter = Counter(r.get("town") for r in records)
+        return {town for town, count in town_counts.items() if count >= expected}
+
     def _append_results(self, new_records: list[dict[str, Any]]) -> None:
         """Merge new episode records into eval_results.json."""
         existing: list[dict[str, Any]] = []
@@ -673,7 +761,9 @@ class EvaluationAgent:
 
     # -- CARLA lifecycle -------------------------------------------------------
 
-    def _launch_carla(self):
+    def _launch_carla(self, town: str | None = None):
+        if town is not None:
+            _set_default_engine_map(town)
         return launch_carla(self.carla_exe)
 
     def _wait_for_carla(self, max_wait: float = 60.0, poll_interval: float = 3.0) -> None:

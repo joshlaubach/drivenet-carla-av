@@ -137,7 +137,8 @@ class CarlaEnv(gymnasium.Env):
             dtype=np.float32,
         )
 
-        self.client = carla.Client(host, port)
+        _host = "127.0.0.1" if host == "localhost" else host
+        self.client = carla.Client(_host, port)
         self.client.set_timeout(60.0)
         try:
             self.client.get_server_version()

@@ -101,3 +101,19 @@ secondary_treatments:
       value: chill
     covariates: [weather_code, sensor_suite_code, town_code]
     rosenbaum: false
+
+# Difference-in-Differences comparisons.
+# "pre" period = BC model; "post" period = PPO model.
+# DiD = (PPO_treated - BC_treated) - (PPO_control - BC_control)
+# Answers: did PPO fine-tuning help the treated suite *more* than the control?
+# Parallel-trends assumption: without PPO, both suites would have improved equally.
+did_comparisons:
+  - name: did_multi_vs_single
+    treated_suite: multi_cam
+    control_suite: single_cam
+  - name: did_lidar_vs_single
+    treated_suite: lidar
+    control_suite: single_cam
+  - name: did_lidar_vs_multi
+    treated_suite: lidar
+    control_suite: multi_cam

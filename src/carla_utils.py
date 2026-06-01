@@ -24,10 +24,13 @@ _DEFAULT_CARLA_EXE = Path(__file__).resolve().parent.parent / "CARLA_0.9.16" / "
 
 def launch_carla(
     carla_exe: Path | str | None = None,
+    town: str | None = None,
 ) -> subprocess.Popen:
     """Launch a fresh CARLA server process and return the Popen handle.
 
     Uses -dx12 and DXGI_GPU_PREFERENCE=2 for RTX 5080 Blackwell stability.
+    Pass `town` (e.g. "Town02") to boot directly on that map and avoid the
+    Town10HD default that causes sync-mode deadlocks on large HD maps.
     The caller is responsible for calling wait_for_carla() before connecting
     and kill_carla() after use.
     """
@@ -37,8 +40,14 @@ def launch_carla(
             f"CARLA executable not found: {exe}. "
             "Place CARLA at CARLA_0.9.16/ or pass carla_exe= explicitly."
         )
+    # UE4 reads the first positional argument as the map to load.
+    # Placing it immediately after the exe path ensures CARLA boots on the
+    # correct town instead of the Town10HD default, avoiding sync-mode
+    # deadlocks that occur on large HD maps.
+    map_arg = [f"/Game/Carla/Maps/{town}"] if town is not None else []
     cmd = [
         str(exe),
+        *map_arg,
         "-dx12", "-quality-level=Low", "-fps=20",
         "-benchmark", "-windowed", "-ResX=800", "-ResY=600",
         "-nosound", "-NoSplash",
